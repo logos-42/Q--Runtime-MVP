@@ -1,0 +1,28 @@
+# .NET
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.user
+*.suo
+*.cache
+*.log
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Build output
+out/
+publish/
+
+# Quantum specific (模拟输出)
+*.qsim
