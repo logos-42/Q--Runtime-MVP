@@ -17,10 +17,10 @@ namespace QuantumRuntime.QubitPool {
 
     /// 初始化 Qubit 池
     operation InitializeQubitPool(numQubits : Int) : QubitPoolManager {
-        let records = [
-            QubitRecord(i, QubitState_Free(), 0)
-            | i in 0..numQubits - 1
-        ];
+        mutable records = [];
+        for i in 0..numQubits - 1 {
+            set records = records + [QubitRecord(i, QubitState_Free(), 0)];
+        }
         return QubitPoolManager(numQubits, numQubits, records);
     }
 
@@ -30,33 +30,46 @@ namespace QuantumRuntime.QubitPool {
             fail "No free qubits";
         }
 
-        mutable found = -1;
-        mutable newRecords = pool::qubitRecords;
-
+        mutable foundIndex = -1;
+        
+        // 查找第一个空闲 qubit
         for i in 0..Length(pool::qubitRecords) - 1 {
-            if pool::qubitRecords[i]::state == QubitState_Free() {
-                set found = i;
-                let record = pool::qubitRecords[i];
-                let updatedRecord = QubitRecord(record::id, QubitState_Allocated(), record::operationCount + 1);
-                set newRecords = [
-                    if j == i then updatedRecord else pool::qubitRecords[j]
-                    | j in 0..Length(pool::qubitRecords) - 1
-                ];
-                break;
+            if foundIndex == -1 and pool::qubitRecords[i]::state == QubitState_Free() {
+                set foundIndex = i;
             }
         }
 
-        let qubitId = pool::qubitRecords[found]::id;
+        if foundIndex == -1 {
+            fail "No free qubits found";
+        }
+
+        // 构建新的记录数组
+        mutable newRecords = [];
+        for i in 0..Length(pool::qubitRecords) - 1 {
+            if i == foundIndex {
+                let oldRecord = pool::qubitRecords[i];
+                set newRecords = newRecords + [QubitRecord(oldRecord::id, QubitState_Allocated(), oldRecord::operationCount + 1)];
+            } else {
+                set newRecords = newRecords + [pool::qubitRecords[i]];
+            }
+        }
+
+        let qubitId = pool::qubitRecords[foundIndex]::id;
         let newPool = QubitPoolManager(pool::totalQubits, pool::freeCount - 1, newRecords);
         return (qubitId, newPool);
     }
 
     /// 释放 Qubit
     operation ReleaseQubit(qubitId : Int, pool : QubitPoolManager) : QubitPoolManager {
-        let newRecords = [
-            if r::id == qubitId then QubitRecord(r::id, QubitState_Free(), r::operationCount) else r
-            | r in pool::qubitRecords
-        ];
+        mutable newRecords = [];
+        for i in 0..Length(pool::qubitRecords) - 1 {
+            let r = pool::qubitRecords[i];
+            if r::id == qubitId {
+                set newRecords = newRecords + [QubitRecord(r::id, QubitState_Free(), r::operationCount)];
+            } else {
+                set newRecords = newRecords + [r];
+            }
+        }
         return QubitPoolManager(pool::totalQubits, pool::freeCount + 1, newRecords);
     }
 

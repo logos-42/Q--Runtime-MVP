@@ -93,10 +93,14 @@ namespace QuantumRuntime.Scheduler {
         );
 
         // 更新队列
-        let newQueue = [
-            if i == taskIndex then scheduledTask else queue[i]
-            | i in 0..Length(queue) - 1
-        ];
+        mutable newQueue = [];
+        for i in 0..Length(queue) - 1 {
+            if i == taskIndex {
+                set newQueue = newQueue + [scheduledTask];
+            } else {
+                set newQueue = newQueue + [queue[i]];
+            }
+        }
         let newQueueManager = TaskQueueManager(newQueue, scheduler::taskQueue::nextTaskId);
 
         let updatedScheduler = Scheduler(
@@ -134,10 +138,14 @@ namespace QuantumRuntime.Scheduler {
             task::allocatedQubits
         );
 
-        let newQueue = [
-            if i == taskIndex then completedTask else queue[i]
-            | i in 0..Length(queue) - 1
-        ];
+        mutable newQueue = [];
+        for i in 0..Length(queue) - 1 {
+            if i == taskIndex {
+                set newQueue = newQueue + [completedTask];
+            } else {
+                set newQueue = newQueue + [queue[i]];
+            }
+        }
         let newQueueManager = TaskQueueManager(newQueue, scheduler::taskQueue::nextTaskId);
 
         return Scheduler(
@@ -150,7 +158,7 @@ namespace QuantumRuntime.Scheduler {
 
     /// 获取调度器统计
     operation GetStats(scheduler : Scheduler) : (Int, Int, Int, Int) {
-        let (queueLen, nextId) = TaskQueue.GetStats(scheduler::taskQueue);
+        let (queueLen, nextId) = QuantumRuntime.TaskQueue.GetStats(scheduler::taskQueue);
         let (total, free, records) = GetPoolStats(scheduler::qubitPool);
         return (queueLen, total, free, scheduler::globalTimestamp);
     }
@@ -166,8 +174,13 @@ namespace QuantumRuntime.Scheduler {
     /// 打印调度器状态
     operation PrintSchedulerStatus(scheduler : Scheduler) : Unit {
         Message("=== Scheduler Status ===");
-        let policyStr = if scheduler::config::policy == SchedulingPolicy_FIFO() { "FIFO" } else { "Priority" };
-        Message($"Policy: {policyStr}");
+        
+        let policy = scheduler::config::policy;
+        if policy == SchedulingPolicy_FIFO() {
+            Message("Policy: FIFO");
+        } else {
+            Message("Policy: Priority");
+        }
         
         PrintQueueStatus(scheduler::taskQueue);
         

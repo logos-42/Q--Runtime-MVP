@@ -21,15 +21,16 @@ namespace QuantumRuntime.CircuitIR {
 
     /// 添加指令到电路块
     operation AddInstructionToBlock(block : CircuitBlock, instruction : (Int, Int, Int[], Int)) : CircuitBlock {
+        let (id, gateType, qubits, tCount) = instruction;
         let oldCost = block::totalCost;
-        let newQubitCount = MaxInt(oldCost::qubitCount, Length(instruction[2]));
+        let newQubitCount = MaxInt(oldCost::qubitCount, Length(qubits));
         let newCost = ResourceCost(
             oldCost::gateCount + 1,
-            oldCost::tGateCount + instruction[3],
+            oldCost::tGateCount + tCount,
             oldCost::depthEstimate + 1,
             newQubitCount
         );
-        let newInstructions = block::instructions + [instruction[0]];
+        let newInstructions = block::instructions + [id];
         return CircuitBlock(block::name, newCost, newInstructions);
     }
 
