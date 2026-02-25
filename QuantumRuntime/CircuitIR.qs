@@ -1,6 +1,8 @@
 /// 模块：量子电路中间表示（IR）
 namespace QuantumRuntime.CircuitIR {
 
+    open Microsoft.Quantum.Intrinsic;
+
     /// 电路资源成本
     newtype ResourceCost = (gateCount: Int, tGateCount: Int, depthEstimate: Int, qubitCount: Int);
 

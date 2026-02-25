@@ -1,16 +1,16 @@
 /// 模块：Qubit 资源池
 namespace QuantumRuntime.QubitPool {
 
-    /// Qubit 状态
-    enum QubitState {
-        Free = 0,
-        Allocated = 1,
-        InUse = 2,
-        Released = 3
-    }
+    open Microsoft.Quantum.Intrinsic;
+
+    // Qubit 状态常量
+    function QubitState_Free() : Int { return 0; }
+    function QubitState_Allocated() : Int { return 1; }
+    function QubitState_InUse() : Int { return 2; }
+    function QubitState_Released() : Int { return 3; }
 
     /// Qubit 记录
-    newtype QubitRecord = (id: Int, state: QubitState, operationCount: Int);
+    newtype QubitRecord = (id: Int, state: Int, operationCount: Int);
 
     /// Qubit 池管理器
     newtype QubitPoolManager = (totalQubits: Int, freeCount: Int, qubitRecords: QubitRecord[]);
@@ -18,7 +18,7 @@ namespace QuantumRuntime.QubitPool {
     /// 初始化 Qubit 池
     operation InitializeQubitPool(numQubits : Int) : QubitPoolManager {
         let records = [
-            QubitRecord(i, QubitState.Free, 0)
+            QubitRecord(i, QubitState_Free(), 0)
             | i in 0..numQubits - 1
         ];
         return QubitPoolManager(numQubits, numQubits, records);
@@ -34,10 +34,10 @@ namespace QuantumRuntime.QubitPool {
         mutable newRecords = pool::qubitRecords;
 
         for i in 0..Length(pool::qubitRecords) - 1 {
-            if pool::qubitRecords[i]::state == QubitState.Free {
+            if pool::qubitRecords[i]::state == QubitState_Free() {
                 set found = i;
                 let record = pool::qubitRecords[i];
-                let updatedRecord = QubitRecord(record::id, QubitState.Allocated, record::operationCount + 1);
+                let updatedRecord = QubitRecord(record::id, QubitState_Allocated(), record::operationCount + 1);
                 set newRecords = [
                     if j == i then updatedRecord else pool::qubitRecords[j]
                     | j in 0..Length(pool::qubitRecords) - 1
@@ -54,7 +54,7 @@ namespace QuantumRuntime.QubitPool {
     /// 释放 Qubit
     operation ReleaseQubit(qubitId : Int, pool : QubitPoolManager) : QubitPoolManager {
         let newRecords = [
-            if r::id == qubitId then QubitRecord(r::id, QubitState.Free, r::operationCount) else r
+            if r::id == qubitId then QubitRecord(r::id, QubitState_Free(), r::operationCount) else r
             | r in pool::qubitRecords
         ];
         return QubitPoolManager(pool::totalQubits, pool::freeCount + 1, newRecords);

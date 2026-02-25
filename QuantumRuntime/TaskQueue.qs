@@ -1,32 +1,29 @@
 /// 模块：任务队列
 namespace QuantumRuntime.TaskQueue {
 
+    open Microsoft.Quantum.Intrinsic;
     open QuantumRuntime.CircuitIR;
 
-    /// 任务优先级
-    enum TaskPriority {
-        Low = 0,
-        Normal = 1,
-        High = 2,
-        Critical = 3
-    }
+    // 任务优先级常量
+    function TaskPriority_Low() : Int { return 0; }
+    function TaskPriority_Normal() : Int { return 1; }
+    function TaskPriority_High() : Int { return 2; }
+    function TaskPriority_Critical() : Int { return 3; }
 
-    /// 任务状态
-    enum TaskState {
-        Pending = 0,
-        Scheduled = 1,
-        Running = 2,
-        Completed = 3,
-        Failed = 4
-    }
+    // 任务状态常量
+    function TaskState_Pending() : Int { return 0; }
+    function TaskState_Scheduled() : Int { return 1; }
+    function TaskState_Running() : Int { return 2; }
+    function TaskState_Completed() : Int { return 3; }
+    function TaskState_Failed() : Int { return 4; }
 
     /// 任务
     newtype Task = (
         id: Int,
         name: String,
         circuit: CircuitBlock,
-        priority: TaskPriority,
-        state: TaskState,
+        priority: Int,
+        state: Int,
         allocatedQubits: Int[]
     );
 
@@ -39,8 +36,8 @@ namespace QuantumRuntime.TaskQueue {
     }
 
     /// 创建任务
-    operation CreateTask(id : Int, name : String, circuit : CircuitBlock, priority : TaskPriority) : Task {
-        return Task(id, name, circuit, priority, TaskState.Pending, []);
+    operation CreateTask(id : Int, name : String, circuit : CircuitBlock, priority : Int) : Task {
+        return Task(id, name, circuit, priority, TaskState_Pending(), []);
     }
 
     /// 入队
@@ -50,11 +47,8 @@ namespace QuantumRuntime.TaskQueue {
     }
 
     /// 获取优先级值
-    function GetPriorityValue(priority : TaskPriority) : Int {
-        if priority == TaskPriority.Critical { return 4; }
-        elif priority == TaskPriority.High { return 3; }
-        elif priority == TaskPriority.Normal { return 2; }
-        else { return 1; }
+    function GetPriorityValue(priority : Int) : Int {
+        return priority;
     }
 
     /// 获取队列统计

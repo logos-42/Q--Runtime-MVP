@@ -1,6 +1,7 @@
 /// 主程序：量子 - 经典混合系统演示
 namespace QuantumRuntime {
 
+    open Microsoft.Quantum.Intrinsic;
     open QuantumRuntime.QubitPool;
     open QuantumRuntime.CircuitIR;
     open QuantumRuntime.TaskQueue;
@@ -23,7 +24,7 @@ namespace QuantumRuntime {
         PrintCircuitInfo(circuit1_final);
 
         // 创建并提交任务
-        let task = CreateTask(1, "Test-Task", circuit1_final, TaskPriority.Normal);
+        let task = CreateTask(1, "Test-Task", circuit1_final, TaskPriority_Normal());
         let scheduler2 = SubmitTask(scheduler, task);
 
         Message("Submitted task");
