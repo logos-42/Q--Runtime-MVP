@@ -1,3 +1,4 @@
+/// 主程序：量子 - 经典混合系统演示
 namespace QuantumRuntime {
 
     open QuantumRuntime.QubitPool;
@@ -9,22 +10,38 @@ namespace QuantumRuntime {
     operation Main() : Unit {
         Message("=== Quantum Runtime Demo ===");
 
-        let sched = Init(8);
-        Message("Initialized with 8 qubits");
+        // 初始化
+        let scheduler = InitializeScheduler(8);
+        Message("Initialized scheduler with 8 qubits");
 
-        let circuit = CreateCircuitBlock("Bell");
-        let instr = CreateInstruction(1, 0, [0], 0);
+        // 创建电路
+        let circuit1 = CreateCircuitBlock("Bell-State");
+        let instr1 = CreateInstruction(1, 0, [0], 0);
+        let circuit1_final = AddInstructionToBlock(circuit1, instr1);
 
-        Message("Created circuit");
+        Message("Created Bell-State circuit");
+        PrintCircuitInfo(circuit1_final);
 
-        let task = CreateTask(1, "Test", circuit, 1, 0);
-        let sched2 = Submit(sched, task);
+        // 创建并提交任务
+        let task = CreateTask(1, "Test-Task", circuit1_final, TaskPriority.Normal);
+        let scheduler2 = SubmitTask(scheduler, task);
 
-        let (pending, scheduled, completed, ts) = GetStats(sched2);
-        Message($"Tasks: {pending} pending, {scheduled} scheduled, {completed} completed");
+        Message("Submitted task");
 
-        let (total, free, used, rate) = GetUsage(sched2);
-        Message($"Qubits: {total} total, {free} free, {used} used");
+        // 选择并调度任务
+        let nextIdx = SelectNextTask(scheduler2);
+        Message($"Next task index: {nextIdx}");
+
+        if nextIdx >= 0 {
+            let (scheduledTask, scheduler3) = ScheduleTask(scheduler2, nextIdx);
+            Message($"Scheduled task: {scheduledTask::name}");
+
+            let scheduler4 = ExecuteTask(scheduler3, nextIdx);
+            Message("Task completed");
+
+            // 打印状态
+            PrintSchedulerStatus(scheduler4);
+        }
 
         Message("=== Demo Complete ===");
     }
