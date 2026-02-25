@@ -13,12 +13,30 @@ namespace AIIntegration.Silq
     /// </summary>
     public class SilqCircuitAdapter
     {
+        // 静态Regex缓存 - 避免重复创建
+        private static readonly Dictionary<string, Regex> _regexCache = new();
+        // 静态编译选项 - 提升性能
+        private const RegexOptions CompiledOptions = RegexOptions.Compiled;
+        
         private readonly string _silqSource;
         private SilqCircuitMetadata _metadata = new();
         
         public SilqCircuitAdapter(string silqSource)
         {
             _silqSource = silqSource;
+        }
+        
+        /// <summary>
+        /// 获取缓存的Regex对象
+        /// </summary>
+        private static Regex GetCachedRegex(string pattern)
+        {
+            if (!_regexCache.TryGetValue(pattern, out var regex))
+            {
+                regex = new Regex(pattern, CompiledOptions);
+                _regexCache[pattern] = regex;
+            }
+            return regex;
         }
         
         /// <summary>
@@ -172,7 +190,7 @@ namespace AIIntegration.Silq
         
         private int CountOccurrences(string pattern)
         {
-            var regex = new Regex(Regex.Escape(pattern));
+            var regex = GetCachedRegex(Regex.Escape(pattern));
             return regex.Matches(_silqSource).Count;
         }
         

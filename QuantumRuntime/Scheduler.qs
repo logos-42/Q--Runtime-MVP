@@ -5,47 +5,20 @@ namespace QuantumRuntime.Scheduler {
     open QuantumRuntime.TaskQueue;
 
     newtype Policy = Int;
-
-    struct Config {
-        policy: Policy;
-        maxQubits: Int;
-        verbose: Bool;
-    }
-
-    struct Scheduler {
-        config: Config;
-        queue: TaskQueueManager;
-        pool: QubitPoolManager;
-        scheduled: Task[];
-        completed: Task[];
-        timestamp: Int;
-    }
+    newtype Config = (Policy, Int, Bool);
+    newtype Scheduler = (Config, TaskQueueManager, QubitPoolManager, Task[], Task[], Int);
 
     operation Init(numQubits: Int) : Scheduler {
         let pool = InitializeQubitPool(numQubits);
         let queue = Initialize();
-        let config = Config(policy = 1, maxQubits = numQubits, verbose = false);
-        return Scheduler(
-            config = config,
-            queue = queue,
-            pool = pool,
-            scheduled = [],
-            completed = [],
-            timestamp = 0
-        );
+        let config = (1, numQubits, false);
+        return (config, queue, pool, [], [], 0);
     }
 
     operation Submit(sched: Scheduler, task: Task) : Scheduler {
         let (config, queue, pool, scheduled, completed, ts) = sched;
         let newQueue = Enqueue(queue, task);
-        return Scheduler(
-            config = config,
-            queue = newQueue,
-            pool = pool,
-            scheduled = scheduled,
-            completed = completed,
-            timestamp = ts
-        );
+        return (config, newQueue, pool, scheduled, completed, ts);
     }
 
     operation GetStats(sched: Scheduler) : (Int, Int, Int, Int) {
@@ -56,7 +29,7 @@ namespace QuantumRuntime.Scheduler {
 
     operation GetUsage(sched: Scheduler) : (Int, Int, Int, Double) {
         let (config, queue, pool, scheduled, completed, ts) = sched;
-        let (total, free, reserved) = GetStats(pool);
+        let (total, free, reserved) = GetPoolStats(pool);
         let used = total - free;
         let rate = IntAsDouble(used) / IntAsDouble(total);
         return (total, free, used, rate);

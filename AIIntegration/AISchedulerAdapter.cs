@@ -62,40 +62,51 @@ namespace AIIntegration.Scheduler
         /// <summary>
         /// Step 2核心：计算任务综合评分
         /// 结合AI模型和规则引擎
+        /// 优化：移除不必要的try-catch，使用提前验证
         /// </summary>
         public float ComputeTaskScore(Task task, float currentTime)
         {
-            try
+            // 提前验证任务有效性，避免异常处理开销
+            if (!IsValidTask(task))
             {
-                // 特征提取
-                var features = new TaskFeatures(
-                    Depth: task.Circuit.Depth,
-                    TGateCount: task.Circuit.TGateCount,
-                    QubitCount: task.Circuit.QubitCount,
-                    WaitTime: currentTime - task.SubmitTime,
-                    PastPriority: (float)task.Priority / 3f
-                );
-                
-                // AI评分
-                var aiScore = _priorityPredictor.Predict(features);
-                
-                // 规则评分
-                var ruleScore = ComputeRuleBasedScore(task, currentTime);
-                
-                // 模式选择
-                return Mode switch
-                {
-                    OperationMode.Rule => ruleScore,
-                    OperationMode.AI => aiScore,
-                    OperationMode.Hybrid => AIWeight * aiScore + RuleWeight * ruleScore,
-                    _ => ruleScore
-                };
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[AI] 评分计算错误: {ex.Message}, 回退到规则模式");
                 return ComputeRuleBasedScore(task, currentTime);
             }
+            
+            // 特征提取
+            var features = new TaskFeatures(
+                Depth: task.Circuit.Depth,
+                TGateCount: task.Circuit.TGateCount,
+                QubitCount: task.Circuit.QubitCount,
+                WaitTime: currentTime - task.SubmitTime,
+                PastPriority: (float)task.Priority / 3f
+            );
+            
+            // AI评分
+            var aiScore = _priorityPredictor.Predict(features);
+            
+            // 规则评分
+            var ruleScore = ComputeRuleBasedScore(task, currentTime);
+            
+            // 模式选择
+            return Mode switch
+            {
+                OperationMode.Rule => ruleScore,
+                OperationMode.AI => aiScore,
+                OperationMode.Hybrid => AIWeight * aiScore + RuleWeight * ruleScore,
+                _ => ruleScore
+            };
+        }
+        
+        /// <summary>
+        /// 验证任务是否有效
+        /// </summary>
+        private static bool IsValidTask(Task task)
+        {
+            return task != null 
+                && task.Circuit != null
+                && task.Circuit.Depth >= 0
+                && task.Circuit.TGateCount >= 0
+                && task.Circuit.QubitCount >= 0;
         }
         
         /// <summary>
