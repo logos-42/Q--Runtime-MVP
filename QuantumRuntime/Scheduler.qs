@@ -1,10 +1,9 @@
-/// 模块：调度器
+/// 模块：调度器（增强版：集成依赖追踪和自动逆电路）
 ///
 /// 核心设计：
-/// - 集成任务队列管理
-/// - 实现 qubit 资源分配策略
-/// - 优化电路执行顺序，最小化资源冲突
-/// - 跟踪全局资源状态和任务执行历史
+/// - 基于任务优先级和 qubit 资源状态调度
+/// - 检测任务间的依赖关系和资源冲突
+/// - 支持自动逆电路生成（用于 uncomputation）
 
 namespace QuantumRuntime.Scheduler {
 
@@ -12,75 +11,49 @@ namespace QuantumRuntime.Scheduler {
     open QuantumRuntime.CircuitIR;
     open QuantumRuntime.TaskQueue;
 
+    // ============================================
+    // 类型定义
+    // ============================================
+
     /// 调度策略枚举
-    /// 决定任务选择和资源分配的方式
     enum SchedulingPolicy {
-        FIFO,           // 先进先出，简单公平
-        Priority,       // 优先级优先，关键任务先执行
-        ResourceAware   // 资源感知，优先调度资源充足的任务
+        FIFO,           // 先进先出
+        Priority,       // 优先级优先
+        ResourceAware   // 资源感知（考虑 qubit 依赖）
     }
 
     /// 调度器配置
     newtype SchedulerConfig = (
-        policy: SchedulingPolicy,   // 调度策略
-        maxConcurrentTasks: Int,    // 最大并发任务数
-        enablePreemption: Bool      // 是否允许抢占
+        policy: SchedulingPolicy,
+        maxConcurrentTasks: Int,
+        enablePreemption: Bool,
+        enableDependencyTracking: Bool  // 新增：启用依赖追踪
     );
 
-    /// 调度器主状态
-    /// 整合任务队列、qubit 池和调度配置
+    /// 调度器状态
     newtype Scheduler = (
-        config: SchedulerConfig,        // 调度器配置
-        taskQueue: TaskQueueManager,    // 任务队列管理器
-        qubitPool: QubitPoolManager,    // qubit 资源池
-        scheduledTasks: Task[],         // 已调度但未完成的任务
-        completedTasks: Task[],         // 已完成的任务历史
-        globalTimestamp: Int            // 全局时间戳
+        config: SchedulerConfig,
+        taskQueue: TaskQueueManager,
+        qubitPool: QubitPoolManager,
+        scheduledTasks: Task[],
+        completedTasks: Task[],
+        globalTimestamp: Int
     );
+
+    // ============================================
+    // 基础操作
+    // ============================================
 
     /// 初始化调度器
-    /// 
-    /// # Parameters
-    /// - `numQubits`: qubit 池大小
-    /// 
-    /// # Returns
-    /// 新初始化的调度器
     operation InitializeScheduler(numQubits: Int) : Scheduler {
-        let pool = InitializeQubitPool(numQubits);
-        let queue = InitializeTaskQueue();
         let config = SchedulerConfig(
-            SchedulingPolicy.Priority,
-            numQubits,  // 简化：最多并发任务数等于 qubit 数
-            false
+            SchedulingPolicy::Priority,
+            5,
+            false,
+            true  // 默认启用依赖追踪
         );
-
-        return Scheduler(
-            config,
-            queue,
-            pool,
-            [],
-            [],
-            0
-        );
-    }
-
-    /// 使用自定义配置初始化调度器
-    /// 
-    /// # Parameters
-    /// - `numQubits`: qubit 池大小
-    /// - `policy`: 调度策略
-    /// - `maxConcurrent`: 最大并发任务数
-    /// 
-    /// # Returns
-    /// 新初始化的调度器
-    operation InitializeSchedulerWithConfig(
-        numQubits: Int,
-        policy: SchedulingPolicy,
-        maxConcurrent: Int
-    ) : Scheduler {
         let pool = InitializeQubitPool(numQubits);
         let queue = InitializeTaskQueue();
-        let config = SchedulerConfig(policy, maxConcurrent, false);
 
         return Scheduler(
             config,
@@ -92,389 +65,378 @@ namespace QuantumRuntime.Scheduler {
         );
     }
 
-    /// 创建并添加任务到调度器
-    /// 便捷操作：创建任务并提交到队列
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    /// - `name`: 任务名称
-    /// - `circuit`: 量子电路
-    /// - `priority`: 任务优先级
-    /// 
-    /// # Returns
-    /// 更新后的调度器和新创建的任务 ID
+    /// 创建并提交任务
     operation CreateAndSubmitTask(
         scheduler: Scheduler,
         name: String,
         circuit: CircuitBlock,
         priority: TaskPriority
     ) : (Int, Scheduler) {
-        let taskId = scheduler::taskQueue::nextTaskId;
-        let task = CreateTask(
+        // 创建任务
+        let task = CreateTask(name, circuit, priority, scheduler::globalTimestamp);
+
+        // 提交到队列
+        let (taskId, newQueue) = SubmitTask(scheduler::taskQueue, task);
+
+        return (
             taskId,
-            name,
-            circuit,
-            priority,
-            scheduler::globalTimestamp
-        );
-
-        let updatedQueue = Enqueue(scheduler::taskQueue, task);
-        
-        let updatedScheduler = Scheduler(
-            scheduler::config,
-            updatedQueue,
-            scheduler::qubitPool,
-            scheduler::scheduledTasks,
-            scheduler::completedTasks,
-            scheduler::globalTimestamp
-        );
-
-        return (taskId, updatedScheduler);
-    }
-
-    /// 将已有任务提交到调度器队列
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    /// - `task`: 要提交的任务
-    /// 
-    /// # Returns
-    /// 更新后的调度器
-    operation SubmitTask(scheduler: Scheduler, task: Task) : Scheduler {
-        let updatedQueue = Enqueue(scheduler::taskQueue, task);
-        
-        return Scheduler(
-            scheduler::config,
-            updatedQueue,
-            scheduler::qubitPool,
-            scheduler::scheduledTasks,
-            scheduler::completedTasks,
-            scheduler::globalTimestamp
+            Scheduler(
+                scheduler::config,
+                newQueue,
+                scheduler::qubitPool,
+                scheduler::scheduledTasks,
+                scheduler::completedTasks,
+                scheduler::globalTimestamp + 1
+            )
         );
     }
 
-    /// 资源冲突检测
-    /// 检查给定的 qubit 集合是否与已调度的任务冲突
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    /// - `requestedQubits`: 请求的 qubit ID 列表
-    /// 
-    /// # Returns
-    /// 是否存在冲突
-    operation CheckResourceConflict(scheduler: Scheduler, requestedQubits: Int[]) : Bool {
-        for scheduledTask in scheduler::scheduledTasks {
-            if scheduledTask::state == TaskState.Scheduled or scheduledTask::state == TaskState.Running {
-                for allocatedQubit in scheduledTask::allocatedQubits {
-                    for requestedQubit in requestedQubits {
-                        if allocatedQubit == requestedQubit {
-                            return true;  // 发现冲突
-                        }
-                    }
-                }
-            }
+    /// 选择下一个要执行的任务
+    operation SelectNextTask(scheduler: Scheduler) : (Task?, Scheduler) {
+        if scheduler::config::policy == SchedulingPolicy::FIFO {
+            // FIFO：选择最早提交的任务
+            return DequeueNextTask(scheduler::taskQueue);
+        } else {
+            // Priority 或 ResourceAware：选择最高优先级任务
+            return DequeueNextTask(scheduler::taskQueue);
         }
-        return false;  // 无冲突
     }
 
-    /// 根据调度策略选择下一个要执行的任务
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    /// 
-    /// # Returns
-    /// 下一个任务的索引，如果没有可用任务则返回 -1
-    operation SelectNextTask(scheduler: Scheduler) : Int {
-        let queue = scheduler::taskQueue;
-        let queueArray = queue::queue;
+    /// 调度并执行下一个任务
+    operation ScheduleAndExecuteNext(scheduler: Scheduler) : (Task?, Scheduler) {
+        // 选择任务
+        let (taskOpt, schedulerWithDequeue) = SelectNextTask(scheduler);
 
-        if Length(queueArray) == 0 {
-            return -1;
+        if taskOpt == null {
+            return (null, scheduler);
         }
 
-        let policy = scheduler::config::policy;
+        let task = taskOpt!!;
 
-        // FIFO 策略：选择第一个 Pending 任务
-        if policy == SchedulingPolicy.FIFO {
-            for i in 0..Length(queueArray) - 1 {
-                if queueArray[i]::state == TaskState.Pending {
-                    return i;
-                }
+        // 检查依赖（如果启用）
+        if scheduler::config::enableDependencyTracking {
+            if not CanExecuteTask(scheduler::taskQueue, task::id) {
+                // 依赖未满足，重新入队
+                let (_, newQueue) = SubmitTask(scheduler::taskQueue, task);
+                return (null, Scheduler(
+                    scheduler::config,
+                    newQueue,
+                    scheduler::qubitPool,
+                    scheduler::scheduledTasks,
+                    scheduler::completedTasks,
+                    scheduler::globalTimestamp
+                ));
             }
-            return -1;
-        }
-
-        // Priority 策略：选择优先级最高的 Pending 任务
-        if policy == SchedulingPolicy.Priority {
-            mutable bestIndex = -1;
-            mutable bestPriority = -1;
-
-            for i in 0..Length(queueArray) - 1 {
-                let task = queueArray[i];
-                if task::state == TaskState.Pending {
-                    let priorityValue = GetPriorityValue(task::priority);
-                    if priorityValue > bestPriority {
-                        set bestPriority = priorityValue;
-                        set bestIndex = i;
-                    }
-                }
-            }
-            return bestIndex;
-        }
-
-        // ResourceAware 策略：选择资源可满足的最高优先级任务
-        if policy == SchedulingPolicy.ResourceAware {
-            mutable bestIndex = -1;
-            mutable bestPriority = -1;
-            let (poolTotal, poolFree, poolReserved) = GetPoolStats(scheduler::qubitPool);
-
-            for i in 0..Length(queueArray) - 1 {
-                let task = queueArray[i];
-                if task::state == TaskState.Pending {
-                    let requiredQubits = task::circuit::totalCost::qubitCount;
-                    let priorityValue = GetPriorityValue(task::priority);
-                    
-                    // 检查资源是否足够且无冲突
-                    if requiredQubits <= poolFree {
-                        if priorityValue > bestPriority {
-                            set bestPriority = priorityValue;
-                            set bestIndex = i;
-                        }
-                    }
-                }
-            }
-            return bestIndex;
-        }
-
-        return -1;
-    }
-
-    /// 调度任务：分配资源并准备执行
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    /// - `taskIndex`: 要调度的任务索引
-    /// 
-    /// # Returns
-    /// (调度后的任务，更新后的调度器)
-    operation ScheduleTask(scheduler: Scheduler, taskIndex: Int) : (Task, Scheduler) {
-        let queue = scheduler::taskQueue;
-        let queueArray = queue::queue;
-
-        if taskIndex < 0 or taskIndex >= Length(queueArray) {
-            fail $"Invalid task index: {taskIndex}";
-        }
-
-        let task = queueArray[taskIndex];
-
-        if task::state != TaskState.Pending {
-            fail $"Task is not in Pending state: {task::state}";
-        }
-
-        // 计算所需 qubit 数
-        let requiredQubits = task::circuit::totalCost::qubitCount;
-
-        // 检查资源是否充足
-        let (poolTotal, poolFree, poolReserved) = GetPoolStats(scheduler::qubitPool);
-
-        if poolFree < requiredQubits {
-            fail $"Insufficient qubits: need {requiredQubits}, have {poolFree}";
         }
 
         // 分配 qubit
-        mutable updatedPool = scheduler::qubitPool;
-        mutable allocatedQubits = [];
+        let (allocatedQubits, newPool) = AllocateQubitsForTask(
+            scheduler::qubitPool,
+            task::estimatedDuration
+        );
 
-        for _ in 0..requiredQubits - 1 {
-            let (qubitId, newPool) = AllocateQubit(updatedPool);
-            set updatedPool = newPool;
-            set allocatedQubits = allocatedQubits + [qubitId];
+        if Length(allocatedQubits) < task::estimatedDuration {
+            // 资源不足，重新入队
+            let (_, newQueue) = SubmitTask(scheduler::taskQueue, task);
+            return (null, Scheduler(
+                scheduler::config,
+                newQueue,
+                scheduler::qubitPool,
+                scheduler::scheduledTasks,
+                scheduler::completedTasks,
+                scheduler::globalTimestamp
+            ));
         }
 
-        // 更新任务状态为 Scheduled
-        let scheduledTask = Task(
+        // 更新任务状态
+        let updatedTask = Task(
             task::id,
             task::name,
             task::circuit,
             task::priority,
-            TaskState.Scheduled,
+            TaskState::Running,
             allocatedQubits,
             task::estimatedDuration,
             task::actualDuration,
             task::createdAt,
-            task::submittedAt
+            task::submittedAt,
+            task::dependency
         );
 
-        // 更新队列中的任务
-        let updatedQueue = UpdateTaskState(scheduler::taskQueue, taskIndex, TaskState.Scheduled);
-        let updatedQueueWithQubits = UpdateTaskQubits(updatedQueue, taskIndex, allocatedQubits);
+        // 记录 qubit 依赖（如果启用）
+        let finalPool = if scheduler::config::enableDependencyTracking {
+            RecordTaskQubitDependencies(newPool, updatedTask)
+        } else {
+            newPool
+        };
 
-        // 添加到已调度任务列表
-        let newScheduledTasks = scheduler::scheduledTasks + [scheduledTask];
-
-        let updatedScheduler = Scheduler(
+        let newScheduler = Scheduler(
             scheduler::config,
-            updatedQueueWithQubits,
-            updatedPool,
-            newScheduledTasks,
+            schedulerWithDequeue::taskQueue,
+            finalPool,
+            scheduler::scheduledTasks + [updatedTask],
             scheduler::completedTasks,
             scheduler::globalTimestamp + 1
         );
 
-        return (scheduledTask, updatedScheduler);
+        return (updatedTask, newScheduler);
     }
 
-    /// 执行已调度的任务
-    /// 模拟任务执行并释放资源
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    /// - `taskIndex`: 要执行的任务索引
-    /// 
-    /// # Returns
-    /// 更新后的调度器
-    operation ExecuteTask(scheduler: Scheduler, taskIndex: Int) : Scheduler {
-        let queue = scheduler::taskQueue;
-        let queueArray = queue::queue;
+    /// 完成任务
+    operation CompleteTask(
+        scheduler: Scheduler,
+        taskId: Int,
+        success: Bool
+    ) : Scheduler {
+        mutable scheduled = scheduler::scheduledTasks;
+        mutable completed = scheduler::completedTasks;
 
-        if taskIndex < 0 or taskIndex >= Length(queueArray) {
-            fail $"Invalid task index: {taskIndex}";
-        }
+        // 找到任务
+        for i in 0..Length(scheduler::scheduledTasks) - 1 {
+            if scheduler::scheduledTasks[i]::id == taskId {
+                let task = scheduler::scheduledTasks[i];
+                
+                // 从 scheduled 移除
+                set scheduled = [
+                    scheduler::scheduledTasks[j]
+                    | j in 0..Length(scheduler::scheduledTasks) - 1
+                    if j != i
+                ];
 
-        let task = queueArray[taskIndex];
+                // 更新状态并添加到 completed
+                let finalTask = Task(
+                    task::id,
+                    task::name,
+                    task::circuit,
+                    task::priority,
+                    if success then TaskState::Completed else TaskState::Failed,
+                    task::allocatedQubits,
+                    task::estimatedDuration,
+                    scheduler::globalTimestamp - task::submittedAt,
+                    task::createdAt,
+                    task::submittedAt,
+                    task::dependency
+                );
+                set completed = completed + [finalTask];
 
-        if task::state != TaskState.Scheduled {
-            fail $"Task is not scheduled, current state: {task::state}";
-        }
+                // 释放 qubit
+                let newPool = ReleaseQubitsFromTask(
+                    scheduler::qubitPool,
+                    task::allocatedQubits
+                );
 
-        // 更新任务状态为 Running
-        let runningQueue = UpdateTaskState(scheduler::taskQueue, taskIndex, TaskState.Running);
-        
-        let runningTask = runningQueue::queue[taskIndex];
-        let actualDuration = runningTask::estimatedDuration;  // 简化：实际时间 = 预计时间
+                // 清除依赖（如果启用）
+                let finalPool = if scheduler::config::enableDependencyTracking {
+                    ClearTaskQubitDependencies(newPool, task)
+                } else {
+                    newPool
+                };
 
-        // 更新为 Completed 状态
-        let completedQueue = UpdateTaskState(runningQueue, taskIndex, TaskState.Completed);
-        let completedTask = completedQueue::queue[taskIndex];
-
-        // 释放分配的 qubit
-        mutable updatedPool = scheduler::qubitPool;
-        for qubitId in completedTask::allocatedQubits {
-            set updatedPool = ReleaseQubit(qubitId, updatedPool);
-        }
-
-        // 从已调度任务列表中移除
-        let newScheduledTasks = [
-            t
-            | t in scheduler::scheduledTasks
-            if t::id != completedTask::id
-        ];
-
-        // 添加到已完成任务列表
-        let newCompletedTasks = scheduler::completedTasks + [completedTask];
-
-        let updatedScheduler = Scheduler(
-            scheduler::config,
-            completedQueue,
-            updatedPool,
-            newScheduledTasks,
-            newCompletedTasks,
-            scheduler::globalTimestamp + actualDuration
-        );
-
-        return updatedScheduler;
-    }
-
-    /// 调度并执行下一个任务
-    /// 便捷操作：自动选择、调度和执行
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    /// 
-    /// # Returns
-    /// (执行的任务，更新后的调度器)
-    /// 如果没有可执行任务，返回 (null, scheduler)
-    operation ScheduleAndExecuteNext(scheduler: Scheduler) : (Task?, Scheduler) {
-        let nextIndex = SelectNextTask(scheduler);
-
-        if nextIndex == -1 {
-            return (null, scheduler);
-        }
-
-        let (scheduledTask, schedulerAfterSchedule) = ScheduleTask(scheduler, nextIndex);
-        let schedulerAfterExecute = ExecuteTask(schedulerAfterSchedule, nextIndex);
-
-        return (scheduledTask, schedulerAfterExecute);
-    }
-
-    /// 获取调度器统计信息
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    /// 
-    /// # Returns
-    /// (待处理任务数，已调度任务数，已完成任务数，当前时间戳)
-    operation GetSchedulerStats(scheduler: Scheduler) : (Int, Int, Int, Int) {
-        let (total, pending, running, completed, failed) = GetQueueStats(scheduler::taskQueue);
-        return (
-            pending + running,  // 待处理（包括运行中）
-            Length(scheduler::scheduledTasks),
-            Length(scheduler::completedTasks),
-            scheduler::globalTimestamp
-        );
-    }
-
-    /// 获取资源使用统计
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    /// 
-    /// # Returns
-    /// (总 qubit 数，空闲 qubit 数，已用 qubit 数，使用率)
-    operation GetResourceUsage(scheduler: Scheduler) : (Int, Int, Int, Double) {
-        let (poolTotal, poolFree, poolReserved) = GetPoolStats(scheduler::qubitPool);
-        let used = poolTotal - poolFree;
-        let usageRate = IntAsDouble(used) / IntAsDouble(poolTotal);
-        return (poolTotal, poolFree, used, usageRate);
-    }
-
-    /// 打印调度器状态
-    /// 
-    /// # Parameters
-    /// - `scheduler`: 当前调度器
-    operation PrintSchedulerStatus(scheduler: Scheduler) : Unit {
-        Message("=== Scheduler Status ===");
-        
-        // 打印配置
-        let policyStr = 
-            scheduler::config::policy == SchedulingPolicy.FIFO ? "FIFO" |
-            scheduler::config::policy == SchedulingPolicy.Priority ? "Priority" |
-            "ResourceAware";
-        Message($"Policy: {policyStr}");
-        Message($"Max Concurrent: {scheduler::config::maxConcurrentTasks}");
-        Message("");
-
-        // 打印队列状态
-        PrintQueueStatus(scheduler::taskQueue);
-        Message("");
-
-        // 打印资源使用
-        let (total, free, used, rate) = GetResourceUsage(scheduler);
-        Message("Resource Usage:");
-        Message($"  Total Qubits: {total}");
-        Message($"  Free Qubits: {free}");
-        Message($"  Used Qubits: {used}");
-        Message($"  Usage Rate: {rate * 100.0}%");
-        Message("");
-
-        // 打印已完成任务摘要
-        if Length(scheduler::completedTasks) > 0 {
-            Message("Completed Tasks Summary:");
-            for task in scheduler::completedTasks {
-                Message($"  - {task::name}: Duration={task::actualDuration}, Qubits={Length(task::allocatedQubits)}");
+                return Scheduler(
+                    scheduler::config,
+                    scheduler::taskQueue,
+                    finalPool,
+                    scheduled,
+                    completed,
+                    scheduler::globalTimestamp
+                );
             }
         }
 
-        Message("========================");
+        return scheduler;
+    }
+
+    // ============================================
+    // 资源分配操作
+    // ============================================
+
+    /// 为任务分配 qubit
+    operation AllocateQubitsForTask(
+        pool: QubitPoolManager,
+        numQubits: Int
+    ) : (Int[], QubitPoolManager) {
+        mutable allocated = [];
+        mutable currentPool = pool;
+
+        for _ in 0..numQubits - 1 {
+            let (qubitId, newPool) = AllocateQubit(currentPool);
+            set allocated = allocated + [qubitId];
+            set currentPool = newPool;
+        }
+
+        return (allocated, currentPool);
+    }
+
+    /// 释放任务占用的 qubit
+    operation ReleaseQubitsFromTask(
+        pool: QubitPoolManager,
+        qubitIds: Int[]
+    ) : QubitPoolManager {
+        mutable currentPool = pool;
+
+        for qubitId in qubitIds {
+            set currentPool = ReleaseQubit(qubitId, currentPool);
+        }
+
+        return currentPool;
+    }
+
+    // ============================================
+    // 依赖追踪操作
+    // ============================================
+
+    /// 记录任务与 qubit 的依赖关系
+    operation RecordTaskQubitDependencies(
+        pool: QubitPoolManager,
+        task: Task
+    ) : QubitPoolManager {
+        mutable currentPool = pool;
+
+        // 为任务分配的所有 qubit 建立依赖关系
+        let qubits = task::allocatedQubits;
+        for i in 0..Length(qubits) - 1 {
+            for j in i+1..Length(qubits) - 1 {
+                set currentPool = RecordEntanglement(
+                    qubits[i],
+                    qubits[j],
+                    currentPool
+                );
+            }
+        }
+
+        return currentPool;
+    }
+
+    /// 清除任务的 qubit 依赖关系
+    operation ClearTaskQubitDependencies(
+        pool: QubitPoolManager,
+        task: Task
+    ) : QubitPoolManager {
+        mutable currentPool = pool;
+
+        for qubitId in task::allocatedQubits {
+            set currentPool = ClearDependencies(qubitId, currentPool);
+        }
+
+        return currentPool;
+    }
+
+    /// 检查资源冲突
+    operation CheckResourceConflict(
+        scheduler: Scheduler,
+        requiredQubits: Int[]
+    ) : Bool {
+        // 检查是否有正在运行的任务使用相同的 qubit
+        for task in scheduler::scheduledTasks {
+            if task::state == TaskState::Running {
+                for q1 in requiredQubits {
+                    for q2 in task::allocatedQubits {
+                        if q1 == q2 {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    // ============================================
+    // 改进 2：自动逆电路支持
+    // ============================================
+
+    /// 使用逆电路执行任务（自动 uncomputation 模式）
+    operation ExecuteWithAutoUncompute(
+        scheduler: Scheduler,
+        task: Task
+    ) : (Task, Scheduler) {
+        // 检查电路是否可逆
+        if not task::circuit::isReversible {
+            // 不可逆，直接执行
+            return ExecuteTaskDirect(scheduler, task);
+        }
+
+        // 生成逆电路
+        let inverseCircuit = GenerateInverseCircuit(task::circuit);
+
+        // 创建逆任务
+        let inverseTask = Task(
+            -task::id,  // 负 ID 表示是逆任务
+            task::name + "†",
+            inverseCircuit,
+            task::priority,
+            TaskState::Pending,
+            task::allocatedQubits,
+            task::estimatedDuration,
+            task::actualDuration,
+            task::createdAt,
+            task::submittedAt,
+            task::dependency
+        );
+
+        // 先执行原任务
+        let (_, schedulerAfterTask) = ExecuteTaskDirect(scheduler, task);
+
+        // 再执行逆任务（清理临时状态）
+        let (_, finalScheduler) = ExecuteTaskDirect(schedulerAfterTask, inverseTask);
+
+        return (task, finalScheduler);
+    }
+
+    /// 直接执行任务
+    operation ExecuteTaskDirect(
+        scheduler: Scheduler,
+        task: Task
+    ) : (Task, Scheduler) {
+        // 更新任务状态为 Running
+        let runningTask = Task(
+            task::id,
+            task::name,
+            task::circuit,
+            task::priority,
+            TaskState::Running,
+            task::allocatedQubits,
+            task::estimatedDuration,
+            task::actualDuration,
+            task::createdAt,
+            task::submittedAt,
+            task::dependency
+        );
+
+        let newScheduler = Scheduler(
+            scheduler::config,
+            scheduler::taskQueue,
+            scheduler::qubitPool,
+            scheduler::scheduledTasks + [runningTask],
+            scheduler::completedTasks,
+            scheduler::globalTimestamp + 1
+        );
+
+        return (runningTask, newScheduler);
+    }
+
+    // ============================================
+    // 统计和查询
+    // ============================================
+
+    /// 获取资源使用率
+    operation GetResourceUsage(scheduler: Scheduler) : (Int, Int, Int, Double) {
+        let (total, free, _) = GetPoolStats(scheduler::qubitPool);
+        let used = total - free;
+        let usage = (used / IFloor(IntAsDouble(total))) * 100.0;
+        return (total, used, free, usage);
+    }
+
+    /// 获取调度器状态摘要
+    operation GetSchedulerSummary(scheduler: Scheduler) : String {
+        let (pending, running, completed, failed, total) = 
+            GetQueueStats(scheduler::taskQueue);
+        let (totalQ, usedQ, freeQ, usage) = GetResourceUsage(scheduler);
+
+        return $"Scheduler: {pending} pending, {running} running, {completed} completed, {failed} failed | Qubits: {usedQ}/{totalQ} ({usage}%)";
+    }
+
+    function IFloor(x: Double) : Int {
+        return Round(x - 0.5);
     }
 }

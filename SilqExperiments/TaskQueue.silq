@@ -1,0 +1,254 @@
+// ============================================
+// TaskQueue.silq - 量子任务队列
+// ============================================
+// 实现经典任务队列管理，用于追踪量子操作请求
+
+// 任务状态
+enum TaskStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled
+}
+
+// 任务类型
+enum TaskType {
+    GateOperation,
+    Measurement,
+    CircuitExecution,
+    StatePreparation
+}
+
+// 任务优先级
+enum TaskPriority {
+    Low,
+    Normal,
+    High,
+    Critical
+}
+
+// 任务定义
+newtype QuantumTask = (
+    id: !ℕ,
+    taskType: TaskType,
+    priority: TaskPriority,
+    status: TaskStatus,
+    qubitIndices: !ℕ[],
+    parameters: !ℝ[],
+    createdAt: !ℕ,
+    startedAt: !ℕ,
+    completedAt: !ℕ,
+    result: !𝔹
+);
+
+// 队列配置
+newtype QueueConfig = (
+    maxQueueSize: !ℕ,
+    maxConcurrentTasks: !ℕ,
+    defaultPriority: TaskPriority
+);
+
+// 任务队列状态
+newtype TaskQueue = (
+    tasks: QuantumTask[],
+    config: QueueConfig,
+    nextTaskId: !ℕ,
+    runningCount: !ℕ,
+    completedCount: !ℕ,
+    failedCount: !ℕ
+);
+
+// ============================================
+// 核心函数
+// ============================================
+
+// 创建新的任务队列
+def createTaskQueue[config: QueueConfig](): TaskQueue {
+    return TaskQueue(
+        tasks: [],
+        config: config,
+        nextTaskId: 0,
+        runningCount: 0,
+        completedCount: 0,
+        failedCount: 0
+    );
+}
+
+// 创建新任务
+def createTask[
+    queue: TaskQueue,
+    taskType: TaskType,
+    qubitIndices: !ℕ[],
+    parameters: !ℝ[]
+](priority: TaskPriority): (!ℕ, TaskQueue) {
+    var newQueue = queue;
+    
+    // 检查队列是否已满
+    if Length(queue.tasks) >= config.maxQueueSize {
+        return (Length(queue.tasks), queue); // 返回错误
+    }
+    
+    let task = QuantumTask(
+        id: queue.nextTaskId,
+        taskType: taskType,
+        priority: priority,
+        status: TaskStatus.Pending,
+        qubitIndices: qubitIndices,
+        parameters: parameters,
+        createdAt: queue.nextTaskId, // 简化：使用 ID 作为时间戳
+        startedAt: 0,
+        completedAt: 0,
+        result: false
+    );
+    
+    newQueue.tasks := queue.tasks ++ [task];
+    newQueue.nextTaskId := queue.nextTaskId + 1;
+    
+    return (task.id, newQueue);
+}
+
+// 从队列中获取下一个待处理任务
+def getNextPendingTask[queue: TaskQueue](): (!ℕ, !𝟙) {
+    for i in [0..Length(queue.tasks)) {
+        if queue.tasks[i].status == TaskStatus.Pending {
+            return (i, ());
+        }
+    }
+    return (Length(queue.tasks), ()); // 未找到
+}
+
+// 开始执行任务
+def startTask[queue: TaskQueue](taskId: !ℕ): TaskQueue {
+    var newQueue = queue;
+    
+    // 检查并发限制
+    if queue.runningCount >= queue.config.maxConcurrentTasks {
+        return queue;
+    }
+    
+    for i in [0..Length(queue.tasks)) {
+        if queue.tasks[i].id == taskId && queue.tasks[i].status == TaskStatus.Pending {
+            let oldTask = queue.tasks[i];
+            let newTask = QuantumTask(
+                id: oldTask.id,
+                taskType: oldTask.taskType,
+                priority: oldTask.priority,
+                status: TaskStatus.Running,
+                qubitIndices: oldTask.qubitIndices,
+                parameters: oldTask.parameters,
+                createdAt: oldTask.createdAt,
+                startedAt: oldTask.createdAt + 1,
+                completedAt: 0,
+                result: oldTask.result
+            );
+            newQueue.tasks[i] := newTask;
+            newQueue.runningCount := queue.runningCount + 1;
+            break;
+        }
+    }
+    
+    return newQueue;
+}
+
+// 完成任务
+def completeTask[queue: TaskQueue](taskId: !ℕ, result: !𝔹): TaskQueue {
+    var newQueue = queue;
+    
+    for i in [0..Length(queue.tasks)) {
+        if queue.tasks[i].id == taskId && queue.tasks[i].status == TaskStatus.Running {
+            let oldTask = queue.tasks[i];
+            let newTask = QuantumTask(
+                id: oldTask.id,
+                taskType: oldTask.taskType,
+                priority: oldTask.priority,
+                status: TaskStatus.Completed,
+                qubitIndices: oldTask.qubitIndices,
+                parameters: oldTask.parameters,
+                createdAt: oldTask.createdAt,
+                startedAt: oldTask.startedAt,
+                completedAt: oldTask.startedAt + 1,
+                result: result
+            );
+            newQueue.tasks[i] := newTask;
+            newQueue.runningCount := queue.runningCount - 1;
+            newQueue.completedCount := queue.completedCount + 1;
+            break;
+        }
+    }
+    
+    return newQueue;
+}
+
+// 失败任务
+def failTask[queue: TaskQueue](taskId: !ℕ): TaskQueue {
+    var newQueue = queue;
+    
+    for i in [0..Length(queue.tasks)) {
+        if queue.tasks[i].id == taskId && queue.tasks[i].status == TaskStatus.Running {
+            let oldTask = queue.tasks[i];
+            let newTask = QuantumTask(
+                id: oldTask.id,
+                taskType: oldTask.taskType,
+                priority: oldTask.priority,
+                status: TaskStatus.Failed,
+                qubitIndices: oldTask.qubitIndices,
+                parameters: oldTask.parameters,
+                createdAt: oldTask.createdAt,
+                startedAt: oldTask.startedAt,
+                completedAt: oldTask.startedAt + 1,
+                result: false
+            );
+            newQueue.tasks[i] := newTask;
+            newQueue.runningCount := queue.runningCount - 1;
+            newQueue.failedCount := queue.failedCount + 1;
+            break;
+        }
+    }
+    
+    return newQueue;
+}
+
+// 获取队列统计
+newtype QueueStats = (
+    totalTasks: !ℕ,
+    pendingTasks: !ℕ,
+    runningTasks: !ℕ,
+    completedTasks: !ℕ,
+    failedTasks: !ℕ,
+    successRate: !ℝ
+);
+
+def getQueueStats[queue: TaskQueue](): QueueStats {
+    var pending := 0: !ℕ;
+    var running := 0: !ℕ;
+    var completed := 0: !ℕ;
+    var failed := 0: !ℕ;
+    
+    for i in [0..Length(queue.tasks)) {
+        let task = queue.tasks[i];
+        if task.status == TaskStatus.Pending { pending := pending + 1; }
+        else if task.status == TaskStatus.Running { running := running + 1; }
+        else if task.status == TaskStatus.Completed { completed := completed + 1; }
+        else if task.status == TaskStatus.Failed { failed := failed + 1; }
+    }
+    
+    let total := completed + failed;
+    let rate := if total > 0 then (!ℝ)(completed) / (!ℝ)(total) else 0.0;
+    
+    return QueueStats(
+        totalTasks: Length(queue.tasks),
+        pendingTasks: pending,
+        runningTasks: running,
+        completedTasks: completed,
+        failedTasks: failed,
+        successRate: rate
+    );
+}
+
+// 按优先级排序任务 (简单实现)
+def sortByPriority[queue: TaskQueue](): TaskQueue {
+    // Silq 目前不支持复杂的排序，这里返回原队列
+    // 实际实现需要自定义排序逻辑
+    return queue;
+}

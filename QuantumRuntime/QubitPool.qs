@@ -1,75 +1,72 @@
-/// 模块：Qubit 资源池
-/// 
-/// 核心设计：
-/// - 跟踪 qubit 的生命周期（分配、使用、释放）
-/// - 抽象 qubit 为有状态的资源对象
-/// - 支持资源估计和约束检查
-
 namespace QuantumRuntime.QubitPool {
-    
-    /// Qubit 的状态枚举
+
+    open Microsoft.Quantum.Intrinsic;
+    open Microsoft.Quantum.Canon;
+
+    /// Qubit 状态枚举
     enum QubitState {
-        Free,           // 可用
-        Allocated,      // 已分配但未使用
-        InUse,          // 正在使用
-        BorrowedByGate, // 被 gate 借用
-        Released        // 已释放
+        Free,
+        Allocated,
+        InUse,
+        BorrowedByGate,
+        Released
     }
 
-    /// 单个 qubit 的资源描述
-    newtype QubitRecord = (
-        id: Int,                    // qubit 唯一标识
-        state: QubitState,          // 当前状态
-        operationCount: Int,        // 经历过多少个操作
-        lastAccessTime: Int,        // 上次访问时间戳
-        parityBuffer: Bool          // 可逆计算的奇偶缓冲区
+    /// 资源依赖信息：追踪 qubit 与其他资源的依赖关系
+    newtype QubitDependency = (
+        dependsOnQubits: Int[],     // 依赖的其他 qubit ID
+        dependedByQubits: Int[],    // 被哪些 qubit 依赖
+        entangledWith: Int[],       // 纠缠的 qubit ID
+        canSafeUncompute: Bool      // 是否可安全 uncompute（无依赖且未纠缠）
     );
 
-    /// Qubit 资源池：集中管理所有 qubit
+    /// Qubit 记录：增强版（添加依赖追踪）
+    newtype QubitRecord = (
+        id: Int,
+        state: QubitState,
+        operationCount: Int,
+        lastAccessTime: Int,
+        parityBuffer: Bool,
+        dependency: QubitDependency   // 新增：依赖信息
+    );
+
+    /// Qubit 资源池管理器
     newtype QubitPoolManager = (
         totalQubits: Int,
         freeCount: Int,
-        reservedQubits: Int[],     // 预留的 qubit ID
-        qubitRecords: QubitRecord[] // 所有 qubit 的状态记录
+        reservedQubits: Int[],
+        qubitRecords: QubitRecord[]
     );
-
-    /// 初始化一个包含 n 个 qubit 的资源池
+    
+    /// 初始化 Qubit 资源池（增强版：包含依赖追踪）
     operation InitializeQubitPool(numQubits: Int) : QubitPoolManager {
-        let initialRecords = [
-            QubitRecord(i, QubitState.Free, 0, 0, false)
-            | i in 0..numQubits - 1
-        ];
-        return QubitPoolManager(
-            numQubits,
-            numQubits,
-            [],
-            initialRecords
-        );
+        mutable records = [];
+        for i in 0..numQubits - 1 {
+            set records = records + [
+                QubitRecord(i, QubitState::Free, 0, 0, false,
+                    QubitDependency([], [], [], true))
+            ];
+        }
+        return QubitPoolManager(numQubits, numQubits, [], records);
     }
-
-    /// 从池中请求一个 qubit
+    
     operation AllocateQubit(pool: QubitPoolManager) : (Int, QubitPoolManager) {
         if pool::freeCount <= 0 {
-            fail "No free qubits available in pool";
+            fail "No free qubits available";
         }
-
-        // 简化：找第一个空闲的
         mutable resultId = -1;
         mutable updated = pool;
-
         for i in 0..Length(pool::qubitRecords) - 1 {
-            if pool::qubitRecords[i]::state == QubitState.Free {
-                resultId = pool::qubitRecords[i]::id;
-                
-                // 更新状态为已分配
+            if pool::qubitRecords[i]::state == QubitState::Free {
+                set resultId = pool::qubitRecords[i]::id;
                 let updatedRecord = QubitRecord(
                     resultId,
-                    QubitState.Allocated,
+                    QubitState::Allocated,
                     pool::qubitRecords[i]::operationCount,
                     pool::qubitRecords[i]::lastAccessTime,
-                    pool::qubitRecords[i]::parityBuffer
+                    pool::qubitRecords[i]::parityBuffer,
+                    pool::qubitRecords[i]::dependency
                 );
-                
                 set updated = QubitPoolManager(
                     pool::totalQubits,
                     pool::freeCount - 1,
@@ -79,38 +76,24 @@ namespace QuantumRuntime.QubitPool {
                         | j in 0..Length(pool::qubitRecords) - 1
                     ]
                 );
-                
-                break;
             }
         }
-
         return (resultId, updated);
     }
 
-    /// 检查 qubit 的操作计数
-    operation GetOperationCount(qubitId: Int, pool: QubitPoolManager) : Int {
-        for record in pool::qubitRecords {
-            if record::id == qubitId {
-                return record::operationCount;
-            }
-        }
-        fail "Qubit not found";
-    }
-
-    /// 释放 qubit 回到池中
+    /// 释放 Qubit（重置依赖信息）
     operation ReleaseQubit(qubitId: Int, pool: QubitPoolManager) : QubitPoolManager {
         mutable updated = pool;
-
         for i in 0..Length(pool::qubitRecords) - 1 {
             if pool::qubitRecords[i]::id == qubitId {
                 let updatedRecord = QubitRecord(
                     qubitId,
-                    QubitState.Free,
+                    QubitState::Free,
                     pool::qubitRecords[i]::operationCount,
                     pool::qubitRecords[i]::lastAccessTime,
-                    false // 重置奇偶缓冲区
+                    false,
+                    QubitDependency([], [], [], true)  // 重置依赖信息
                 );
-                
                 set updated = QubitPoolManager(
                     pool::totalQubits,
                     pool::freeCount + 1,
@@ -120,15 +103,218 @@ namespace QuantumRuntime.QubitPool {
                         | j in 0..Length(pool::qubitRecords) - 1
                     ]
                 );
-                break;
+            }
+        }
+        return updated;
+    }
+    
+    operation GetPoolStats(pool: QubitPoolManager) : (Int, Int, Int) {
+        return (pool::totalQubits, pool::freeCount, Length(pool::reservedQubits));
+    }
+
+    // ============================================
+    // 改进 1：WithTempQubit 高级抽象
+    // ============================================
+    // 封装 within-apply 模式，简化临时 qubit 管理
+    // 类似 Silq 的自动 uncomputation 体验
+
+    /// 使用临时 Qubit 执行操作（自动清理）
+    /// 封装 within-apply 模式，临时 qubit 自动重置
+    operation WithTempQubit<T>(numQubits: Int, body: (Qubit[] => T)) : T {
+        using (temp = Qubit[numQubits]) {
+            within {
+                // 自动初始化到 |0⟩（Q# 默认）
+            } apply {
+                return body(temp);
+            }
+            // 自动 ResetAll(temp)
+        }
+    }
+
+    /// 使用单个临时 Qubit 执行操作
+    operation WithSingleTempQubit<T>(body: (Qubit => T)) : T {
+        return WithTempQubit(1, fun(qs) -> body(qs[0]));
+    }
+
+    /// 使用临时 Qubit 执行计算（带初始化）
+    operation WithInitializedTempQubit<T>(
+        numQubits: Int,
+        init: (Qubit[] => Unit),
+        body: (Qubit[] => T)
+    ) : T {
+        using (temp = Qubit[numQubits]) {
+            within {
+                init(temp);
+            } apply {
+                return body(temp);
+            }
+        }
+    }
+
+    // ============================================
+    // 改进 3：资源依赖追踪操作
+    // ============================================
+
+    /// 记录两个 qubit 之间的纠缠关系
+    operation RecordEntanglement(
+        qubitId1: Int,
+        qubitId2: Int,
+        pool: QubitPoolManager
+    ) : QubitPoolManager {
+        mutable updated = pool;
+
+        // 更新 qubit1 的纠缠列表
+        for i in 0..Length(pool::qubitRecords) - 1 {
+            if pool::qubitRecords[i]::id == qubitId1 {
+                let oldDep = pool::qubitRecords[i]::dependency;
+                let newEntangled = oldDep::entangledWith + [qubitId2];
+                let newDep = QubitDependency(
+                    oldDep::dependsOnQubits,
+                    oldDep::dependedByQubits,
+                    newEntangled,
+                    false  // 有纠缠，不能安全 uncompute
+                );
+                let updatedRecord = QubitRecord(
+                    pool::qubitRecords[i]::id,
+                    pool::qubitRecords[i]::state,
+                    pool::qubitRecords[i]::operationCount,
+                    pool::qubitRecords[i]::lastAccessTime,
+                    pool::qubitRecords[i]::parityBuffer,
+                    newDep
+                );
+                set updated = QubitPoolManager(
+                    pool::totalQubits,
+                    pool::freeCount,
+                    pool::reservedQubits,
+                    [
+                        if j == i then updatedRecord else pool::qubitRecords[j]
+                        | j in 0..Length(pool::qubitRecords) - 1
+                    ]
+                );
+            }
+        }
+
+        // 更新 qubit2 的纠缠列表（对称）
+        for i in 0..Length(updated::qubitRecords) - 1 {
+            if updated::qubitRecords[i]::id == qubitId2 {
+                let oldDep = updated::qubitRecords[i]::dependency;
+                let newEntangled = oldDep::entangledWith + [qubitId1];
+                let newDep = QubitDependency(
+                    oldDep::dependsOnQubits,
+                    oldDep::dependedByQubits,
+                    newEntangled,
+                    false
+                );
+                let updatedRecord = QubitRecord(
+                    updated::qubitRecords[i]::id,
+                    updated::qubitRecords[i]::state,
+                    updated::qubitRecords[i]::operationCount,
+                    updated::qubitRecords[i]::lastAccessTime,
+                    updated::qubitRecords[i]::parityBuffer,
+                    newDep
+                );
+                set updated = QubitPoolManager(
+                    updated::totalQubits,
+                    updated::freeCount,
+                    updated::reservedQubits,
+                    [
+                        if j == i then updatedRecord else updated::qubitRecords[j]
+                        | j in 0..Length(updated::qubitRecords) - 1
+                    ]
+                );
             }
         }
 
         return updated;
     }
 
-    /// 获取池的当前状态（资源估计）
-    operation GetPoolStats(pool: QubitPoolManager) : (Int, Int, Int) {
-        return (pool::totalQubits, pool::freeCount, Length(pool::reservedQubits));
+    /// 记录 qubit 依赖关系（用于电路调度）
+    operation RecordDependency(
+        qubitId: Int,
+        dependsOn: Int[],
+        pool: QubitPoolManager
+    ) : QubitPoolManager {
+        mutable updated = pool;
+
+        for i in 0..Length(pool::qubitRecords) - 1 {
+            if pool::qubitRecords[i]::id == qubitId {
+                let oldDep = pool::qubitRecords[i]::dependency;
+                let newDep = QubitDependency(
+                    oldDep::dependsOnQubits + dependsOn,
+                    oldDep::dependedByQubits,
+                    oldDep::entangledWith,
+                    false  // 有依赖，不能安全 uncompute
+                );
+                let updatedRecord = QubitRecord(
+                    pool::qubitRecords[i]::id,
+                    pool::qubitRecords[i]::state,
+                    pool::qubitRecords[i]::operationCount,
+                    pool::qubitRecords[i]::lastAccessTime,
+                    pool::qubitRecords[i]::parityBuffer,
+                    newDep
+                );
+                set updated = QubitPoolManager(
+                    pool::totalQubits,
+                    pool::freeCount,
+                    pool::reservedQubits,
+                    [
+                        if j == i then updatedRecord else pool::qubitRecords[j]
+                        | j in 0..Length(pool::qubitRecords) - 1
+                    ]
+                );
+            }
+        }
+
+        return updated;
+    }
+
+    /// 检查 qubit 是否可安全 uncompute
+    operation CanSafeUncompute(qubitId: Int, pool: QubitPoolManager) : Bool {
+        for record in pool::qubitRecords {
+            if record::id == qubitId {
+                return record::dependency::canSafeUncompute;
+            }
+        }
+        return false;
+    }
+
+    /// 清除 qubit 的依赖关系（执行 uncompute 后调用）
+    operation ClearDependencies(qubitId: Int, pool: QubitPoolManager) : QubitPoolManager {
+        mutable updated = pool;
+
+        for i in 0..Length(pool::qubitRecords) - 1 {
+            if pool::qubitRecords[i]::id == qubitId {
+                let newDep = QubitDependency([], [], [], true);
+                let updatedRecord = QubitRecord(
+                    pool::qubitRecords[i]::id,
+                    pool::qubitRecords[i]::state,
+                    pool::qubitRecords[i]::operationCount,
+                    pool::qubitRecords[i]::lastAccessTime,
+                    pool::qubitRecords[i]::parityBuffer,
+                    newDep
+                );
+                set updated = QubitPoolManager(
+                    pool::totalQubits,
+                    pool::freeCount,
+                    pool::reservedQubits,
+                    [
+                        if j == i then updatedRecord else pool::qubitRecords[j]
+                        | j in 0..Length(pool::qubitRecords) - 1
+                    ]
+                );
+            }
+        }
+
+        return updated;
+    }
+
+    /// 获取 qubit 的依赖信息
+    operation GetQubitDependency(qubitId: Int, pool: QubitPoolManager) : QubitDependency? {
+        for record in pool::qubitRecords {
+            if record::id == qubitId {
+                return record::dependency;
+            }
+        }
+        return null;
     }
 }

@@ -1,0 +1,347 @@
+// ============================================
+// Main.silq - Silq 实验入口程序
+// ============================================
+// 包含基础示例验证和测试
+
+// ============================================
+// 基础示例 1: Bell 态制备
+// ============================================
+
+def prepareBellState_example(): 𝔹 × 𝔹 {
+    // 初始化两个量子比特
+    var q1 := false: 𝔹;
+    var q2 := false: 𝔹;
+    
+    // 应用 Hadamard 门到第一个量子比特
+    q1 := H(q1);
+    
+    // 应用 CNOT 门
+    q2 := CNOT(q1, q2);
+    
+    return (q1, q2);
+}
+
+// 测量 Bell 态
+def measureBellState(): !𝔹 × !𝔹 {
+    let (q1, q2) := prepareBellState_example();
+    let m1 := measure(q1);
+    let m2 := measure(q2);
+    return (m1, m2);
+}
+
+// ============================================
+// 基础示例 2: 量子隐形传态
+// ============================================
+
+def quantumTeleportation[stateToTeleport: 𝔹](): !𝔹 {
+    // Alice 想要传输的量子态 (stateToTeleport)
+    
+    // 步骤 1: 制备共享的 Bell 态
+    var aliceBell := false: 𝔹;
+    var bobBell := false: 𝔹;
+    aliceBell := H(aliceBell);
+    bobBell := CNOT(aliceBell, bobBell);
+    
+    // 步骤 2: Alice 对她的两个量子比特进行 Bell 测量
+    // CNOT(state, aliceBell)
+    aliceBell := CNOT(stateToTeleport, aliceBell);
+    
+    // H(state)
+    stateToTeleport := H(stateToTeleport);
+    
+    // 测量
+    let measurement1 := measure(stateToTeleport);
+    let measurement2 := measure(aliceBell);
+    
+    // 步骤 3: Bob 根据测量结果进行校正
+    if measurement2 {
+        bobBell := X(bobBell);
+    }
+    if measurement1 {
+        bobBell := Z(bobBell);
+    }
+    
+    // Bob 的量子比特现在是原始态
+    return measure(bobBell);
+}
+
+// 完整的隐形传态测试
+def testTeleportation[inputBit: !𝔹](): !𝔹 {
+    // 将经典比特转换为量子态
+    var quantumState := inputBit as 𝔹;
+    
+    // 执行隐形传态
+    let result := quantumTeleportation(quantumState);
+    
+    return result;
+}
+
+// ============================================
+// 基础示例 3: Grover 搜索算法
+// ============================================
+
+// Oracle: 标记目标状态 (假设目标是 |11⟩)
+def groverOracle[q1: 𝔹, q2: 𝔹](): 𝔹 × 𝔹 {
+    // 对于目标 |11⟩，应用相位翻转
+    // 使用多控制 Z 门 (简化为 CNOT + 单量子比特门)
+    var q1_temp := q1;
+    var q2_temp := q2;
+    
+    // 简化实现：如果两个都是 1，则翻转相位
+    q1_temp := CNOT(q2_temp, q1_temp);
+    q1_temp := Z(q1_temp);
+    q1_temp := CNOT(q2_temp, q1_temp);
+    
+    return (q1_temp, q2_temp);
+}
+
+// 扩散算子 (Grover 扩散)
+def groverDiffusion[q1: 𝔹, q2: 𝔹](): 𝔹 × 𝔹 {
+    var r1 := q1;
+    var r2 := q2;
+    
+    // 应用 H 到所有量子比特
+    r1 := H(r1);
+    r2 := H(r2);
+    
+    // 应用 X 到所有量子比特
+    r1 := X(r1);
+    r2 := X(r2);
+    
+    // 应用多控制 Z (简化)
+    r1 := CNOT(r2, r1);
+    r1 := Z(r1);
+    r1 := CNOT(r2, r1);
+    
+    // 应用 X 到所有量子比特
+    r1 := X(r1);
+    r2 := X(r2);
+    
+    // 应用 H 到所有量子比特
+    r1 := H(r1);
+    r2 := H(r2);
+    
+    return (r1, r2);
+}
+
+// 完整的 Grover 搜索
+def groverSearch(): !𝔹 × !𝔹 {
+    // 初始化量子比特
+    var q1 := false: 𝔹;
+    var q2 := false: 𝔹;
+    
+    // 步骤 1: 创建均匀叠加
+    q1 := H(q1);
+    q2 := H(q2);
+    
+    // 步骤 2: 应用 Grover 迭代 (对于 2 量子比特，1 次迭代足够)
+    // Oracle
+    let (o1, o2) := groverOracle(q1, q2);
+    q1 := o1;
+    q2 := o2;
+    
+    // 扩散算子
+    let (d1, d2) := groverDiffusion(q1, q2);
+    q1 := d1;
+    q2 := d2;
+    
+    // 步骤 3: 测量
+    let m1 := measure(q1);
+    let m2 := measure(q2);
+    
+    return (m1, m2);
+}
+
+// ============================================
+// 基础示例 4: Deutsch-Jozsa 算法
+// ============================================
+
+// 常量函数 Oracle (f(x) = 0)
+def constantZeroOracle[x: 𝔹](): 𝔹 {
+    return x;
+}
+
+// 常量函数 Oracle (f(x) = 1)
+def constantOneOracle[x: 𝔹](): 𝔹 {
+    return X(x);
+}
+
+// 平衡函数 Oracle (f(x) = x)
+def balancedOracle[x: 𝔹](): 𝔹 {
+    return x;
+}
+
+// Deutsch-Jozsa 算法
+def deutschJozsa[oracle: lifted](): !𝔹 {
+    // 初始化
+    var inputQubit := false: 𝔹;
+    var outputQubit := true: 𝔹;  // |1⟩
+    
+    // 创建叠加态
+    inputQubit := H(inputQubit);
+    outputQubit := H(outputQubit);
+    
+    // 应用 Oracle
+    outputQubit := oracle(inputQubit, outputQubit);
+    
+    // 测量输入量子比特
+    inputQubit := H(inputQubit);
+    let result := measure(inputQubit);
+    
+    // 如果结果是 0，函数是常量；否则是平衡的
+    return result;
+}
+
+// ============================================
+// 资源池和调度器测试
+// ============================================
+
+def testQubitPool(): !𝟙 {
+    // 创建资源池配置
+    let config := PoolConfig(
+        poolSize: 10,
+        maxOperationsPerQubit: 100,
+        enableTracking: true
+    );
+    
+    // 创建资源池
+    let pool := createQubitPool(10, config);
+    
+    // 分配 Qubit
+    let (q1, pool1) := allocateQubit(pool);
+    
+    // 记录操作
+    let pool2 := recordOperation(pool1, q1);
+    let pool3 := recordOperation(pool2, q1);
+    
+    // 释放 Qubit
+    let pool4 := releaseQubit(pool3, q1);
+    
+    // 获取统计
+    let stats := getPoolStats(pool4);
+    
+    print("=== Qubit Pool Test ===");
+    print($"Allocated: {stats.allocatedQubits}");
+    print($"Available: {stats.availableQubits}");
+    print($"Total Ops: {stats.totalOperations}");
+    
+    return ();
+}
+
+def testTaskQueue(): !𝟙 {
+    // 创建队列配置
+    let config := QueueConfig(
+        maxQueueSize: 100,
+        maxConcurrentTasks: 5,
+        defaultPriority: TaskPriority.Normal
+    );
+    
+    // 创建队列
+    let queue := createTaskQueue(config);
+    
+    // 添加任务
+    let (taskId1, queue1) := createTask(
+        queue,
+        TaskType.GateOperation,
+        [0, 1],
+        [0.5],
+        TaskPriority.High
+    );
+    
+    let (taskId2, queue2) := createTask(
+        queue1,
+        TaskType.Measurement,
+        [2],
+        [],
+        TaskPriority.Normal
+    );
+    
+    // 开始任务
+    let queue3 := startTask(queue2, taskId1);
+    
+    // 完成任务
+    let queue4 := completeTask(queue3, taskId1, true);
+    
+    // 获取统计
+    let stats := getQueueStats(queue4);
+    
+    print("=== Task Queue Test ===");
+    print($"Total: {stats.totalTasks}");
+    print($"Completed: {stats.completedTasks}");
+    print($"Success Rate: {stats.successRate}");
+    
+    return ();
+}
+
+// ============================================
+// 电路 IR 测试
+// ============================================
+
+def testCircuitIR(): !𝟙 {
+    // 创建电路块
+    let block := createCircuitBlock([true, false], 2); // "H" 门
+    
+    // 添加 Hadamard 门
+    let hGate := createSingleQubitGate([true, false], 0, []);
+    let hInstr := createInstruction(hGate, [0], [], []);
+    let block1 := addInstruction(block, hInstr);
+    
+    // 添加 CNOT 门
+    let cnotGate := createTwoQubitGate([true, true], 0, 1);
+    let cnotInstr := createInstruction(cnotGate, [1], [0], []);
+    let block2 := addInstruction(block1, cnotInstr);
+    
+    // 打印信息
+    printCircuitInfo(block2);
+    
+    return ();
+}
+
+// ============================================
+// 主函数
+// ============================================
+
+def main(): !𝟙 {
+    print("=== Silq Experiments ===");
+    print("");
+    
+    // 测试 Bell 态
+    print("--- Bell State Test ---");
+    let (m1, m2) := measureBellState();
+    print($"Bell measurement: ({m1}, {m2})");
+    print("");
+    
+    // 测试隐形传态
+    print("--- Quantum Teleportation Test ---");
+    let teleResult0 := testTeleportation(false);
+    let teleResult1 := testTeleportation(true);
+    print($"Teleport |0⟩: {teleResult0}");
+    print($"Teleport |1⟩: {teleResult1}");
+    print("");
+    
+    // 测试 Grover 搜索
+    print("--- Grover Search Test ---");
+    let (g1, g2) := groverSearch();
+    print($"Grover result: ({g1}, {g2})");
+    print("(Expected: (1, 1) for target |11⟩)");
+    print("");
+    
+    // 测试资源池
+    print("--- Resource Pool Test ---");
+    testQubitPool();
+    print("");
+    
+    // 测试任务队列
+    print("--- Task Queue Test ---");
+    testTaskQueue();
+    print("");
+    
+    // 测试电路 IR
+    print("--- Circuit IR Test ---");
+    testCircuitIR();
+    print("");
+    
+    print("=== All Tests Complete ===");
+    
+    return ();
+}

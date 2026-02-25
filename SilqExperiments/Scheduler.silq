@@ -1,0 +1,227 @@
+// ============================================
+// Scheduler.silq - 量子任务调度器
+// ============================================
+// 结合 QubitPool 和 TaskQueue 实现任务调度
+
+// 导入模块 (Silq 使用 import 语句)
+// import QubitPool;
+// import TaskQueue;
+
+// 调度策略
+enum SchedulingPolicy {
+    FIFO,           // 先进先出
+    Priority,       // 优先级调度
+    ShortestJob,    // 最短作业优先
+    QuantumAware    // 量子感知调度 (考虑 qubit 亲和性)
+}
+
+// 调度器配置
+newtype SchedulerConfig = (
+    policy: SchedulingPolicy,
+    maxQueueSize: !ℕ,
+    poolSize: !ℕ,
+    enablePreemption: !𝔹,
+    timeSlice: !ℕ
+);
+
+// 调度器状态
+newtype Scheduler = (
+    config: SchedulerConfig,
+    taskQueue: TaskQueue,
+    qubitPool: QubitPool,
+    currentTaskId: !ℕ,
+    scheduledCount: !ℕ,
+    preemptedCount: !ℕ
+);
+
+// ============================================
+// 核心函数
+// ============================================
+
+// 创建调度器
+def createScheduler[config: SchedulerConfig](): Scheduler {
+    let queueConfig = QueueConfig(
+        maxQueueSize: config.maxQueueSize,
+        maxConcurrentTasks: 1, // 简化：单任务执行
+        defaultPriority: TaskPriority.Normal
+    );
+    let poolConfig = PoolConfig(
+        poolSize: config.poolSize,
+        maxOperationsPerQubit: 1000,
+        enableTracking: true
+    );
+    
+    return Scheduler(
+        config: config,
+        taskQueue: createTaskQueue(queueConfig),
+        qubitPool: createQubitPool(config.poolSize, poolConfig),
+        currentTaskId: Length([]), // 无效 ID
+        scheduledCount: 0,
+        preemptedCount: 0
+    );
+}
+
+// 提交任务到调度器
+def submitTask[
+    scheduler: Scheduler,
+    taskType: TaskType,
+    requiredQubits: !ℕ,
+    parameters: !ℝ[]
+](priority: TaskPriority): (!ℕ, Scheduler) {
+    var newScheduler = scheduler;
+    
+    // 生成 qubit 索引 (简化：顺序分配)
+    var qubitIndices: !ℕ[] = [];
+    for i in [0..requiredQubits) {
+        qubitIndices := qubitIndices ++ [i];
+    }
+    
+    let (taskId, newQueue) := createTask(
+        scheduler.taskQueue,
+        taskType,
+        qubitIndices,
+        parameters,
+        priority
+    );
+    
+    newScheduler.taskQueue := newQueue;
+    
+    return (taskId, newScheduler);
+}
+
+// 调度周期 - 选择并启动下一个任务
+def scheduleTick[scheduler: Scheduler](): Scheduler {
+    var newScheduler = scheduler;
+    
+    // 检查是否有任务正在运行
+    if scheduler.currentTaskId < Length(scheduler.taskQueue.tasks) {
+        // 任务正在运行，检查是否完成
+        let currentTask = scheduler.taskQueue.tasks[scheduler.currentTaskId];
+        if currentTask.status == TaskStatus.Running {
+            // 模拟任务完成 (实际中需要检查量子操作完成状态)
+            let result := true: !𝔹; // 简化：假设成功
+            newScheduler.taskQueue := completeTask(
+                scheduler.taskQueue,
+                scheduler.currentTaskId,
+                result
+            );
+            newScheduler.currentTaskId := Length([]); // 重置
+            newScheduler.scheduledCount := scheduler.scheduledCount + 1;
+        }
+    }
+    
+    // 如果没有任务运行，启动新任务
+    if newScheduler.currentTaskId >= Length(newScheduler.taskQueue.tasks) {
+        let (pendingIdx, _) := getNextPendingTask(newScheduler.taskQueue);
+        if pendingIdx < Length(newScheduler.taskQueue.tasks) {
+            newScheduler.taskQueue := startTask(
+                newScheduler.taskQueue,
+                pendingIdx
+            );
+            newScheduler.currentTaskId := pendingIdx;
+        }
+    }
+    
+    return newScheduler;
+}
+
+// 抢占当前任务
+def preemptCurrentTask[scheduler: Scheduler](): Scheduler {
+    if !scheduler.config.enablePreemption {
+        return scheduler;
+    }
+    
+    var newScheduler = scheduler;
+    
+    if scheduler.currentTaskId < Length(scheduler.taskQueue.tasks) {
+        let currentTask = scheduler.taskQueue.tasks[scheduler.currentTaskId];
+        if currentTask.status == TaskStatus.Running {
+            // 标记为失败 (简化处理)
+            newScheduler.taskQueue := failTask(
+                scheduler.taskQueue,
+                scheduler.currentTaskId
+            );
+            newScheduler.currentTaskId := Length([]);
+            newScheduler.preemptedCount := scheduler.preemptedCount + 1;
+        }
+    }
+    
+    return newScheduler;
+}
+
+// 获取调度器统计
+newtype SchedulerStats = (
+    totalSubmitted: !ℕ,
+    totalScheduled: !ℕ,
+    totalPreempted: !ℕ,
+    queueStats: QueueStats,
+    poolStats: PoolStats
+);
+
+def getSchedulerStats[scheduler: Scheduler](): SchedulerStats {
+    return SchedulerStats(
+        totalSubmitted: Length(scheduler.taskQueue.tasks),
+        totalScheduled: scheduler.scheduledCount,
+        totalPreempted: scheduler.preemptedCount,
+        queueStats: getQueueStats(scheduler.taskQueue),
+        poolStats: getPoolStats(scheduler.qubitPool)
+    );
+}
+
+// 打印调度器状态
+def printSchedulerState[scheduler: Scheduler](): !𝟙 {
+    let stats := getSchedulerStats(scheduler);
+    print("=== Scheduler State ===");
+    print($"Submitted: {stats.totalSubmitted}");
+    print($"Scheduled: {stats.totalScheduled}");
+    print($"Preempted: {stats.totalPreempted}");
+    print($"Queue Success Rate: {stats.queueStats.successRate}");
+    return ();
+}
+
+// ============================================
+// 调度策略实现
+// ============================================
+
+// FIFO 调度 - 按提交顺序执行
+def scheduleFIFO[scheduler: Scheduler](): Scheduler {
+    // FIFO 已在 scheduleTick 中实现
+    return scheduleTick(scheduler);
+}
+
+// 优先级调度 - 选择最高优先级任务
+def schedulePriority[scheduler: Scheduler](): Scheduler {
+    var newScheduler = scheduler;
+    
+    // 查找最高优先级的待处理任务
+    var bestIdx := Length(scheduler.taskQueue.tasks);
+    var bestPriority := TaskPriority.Low;
+    
+    for i in [0..Length(scheduler.taskQueue.tasks)) {
+        let task = scheduler.taskQueue.tasks[i];
+        if task.status == TaskStatus.Pending {
+            // 简化优先级比较
+            if task.priority == TaskPriority.Critical {
+                bestIdx := i;
+                bestPriority := TaskPriority.Critical;
+                break;
+            } else if task.priority == TaskPriority.High && bestPriority < TaskPriority.High {
+                bestIdx := i;
+                bestPriority := TaskPriority.High;
+            } else if task.priority == TaskPriority.Normal && bestPriority < TaskPriority.Normal {
+                bestIdx := i;
+                bestPriority := TaskPriority.Normal;
+            }
+        }
+    }
+    
+    if bestIdx < Length(scheduler.taskQueue.tasks) {
+        newScheduler.taskQueue := startTask(
+            scheduler.taskQueue,
+            bestIdx
+        );
+        newScheduler.currentTaskId := bestIdx;
+    }
+    
+    return newScheduler;
+}

@@ -1,0 +1,257 @@
+// ============================================
+// CircuitIR.silq - 量子电路中间表示
+// ============================================
+// 对应 Q# 的 CircuitIR.qs，使用 Silq 方式表达
+
+// 门类型
+enum GateType {
+    SingleQubit,
+    TwoQubit,
+    ThreeQubit,
+    Measurement,
+    Reset,
+    Custom
+}
+
+// 门定义
+newtype Gate = (
+    gateType: GateType,
+    name: !𝔹[],  // 简化：用布尔数组表示名称
+    targetIndices: !ℕ[],
+    controlIndices: !ℕ[],
+    parameters: !ℝ[],
+    isReversible: !𝔹,
+    isClifford: !𝔹
+);
+
+// 电路指令
+newtype CircuitInstruction = (
+    gate: Gate,
+    targets: !ℕ[],
+    controls: !ℕ[],
+    params: !ℝ[]
+);
+
+// 电路块
+newtype CircuitBlock = (
+    name: !𝔹[],
+    instructions: CircuitInstruction[],
+    qubitCount: !ℕ,
+    depth: !ℕ
+);
+
+// 资源成本
+newtype ResourceCost = (
+    gateCount: !ℕ,
+    tGateCount: !ℕ,
+    depthEstimate: !ℕ,
+    qubitCount: !ℕ,
+    cliffordCount: !ℕ
+);
+
+// ============================================
+// 核心函数
+// ============================================
+
+// 创建单量子比特门
+def createSingleQubitGate[name: !𝔹[], target: !ℕ, params: !ℝ[]](): Gate {
+    let isRev := true: !𝔹;
+    let isCliff := if name == [true, false] then true else false; // X 门是 Clifford
+    return Gate(
+        gateType: GateType.SingleQubit,
+        name: name,
+        targetIndices: [target],
+        controlIndices: [],
+        parameters: params,
+        isReversible: isRev,
+        isClifford: isCliff
+    );
+}
+
+// 创建双量子比特门
+def createTwoQubitGate[name: !𝔹[], control: !ℕ, target: !ℕ](): Gate {
+    return Gate(
+        gateType: GateType.TwoQubit,
+        name: name,
+        targetIndices: [target],
+        controlIndices: [control],
+        parameters: [],
+        isReversible: true,
+        isClifford: true  // CNOT 是 Clifford
+    );
+}
+
+// 创建电路指令
+def createInstruction[gate: Gate](targets: !ℕ[], controls: !ℕ[], params: !ℝ[]): CircuitInstruction {
+    return CircuitInstruction(
+        gate: gate,
+        targets: targets,
+        controls: controls,
+        params: params
+    );
+}
+
+// 创建电路块
+def createCircuitBlock[name: !𝔹[], qubitCount: !ℕ](): CircuitBlock {
+    return CircuitBlock(
+        name: name,
+        instructions: [],
+        qubitCount: qubitCount,
+        depth: 0
+    );
+}
+
+// 添加指令到电路块
+def addInstruction[block: CircuitBlock](instr: CircuitInstruction): CircuitBlock {
+    var newBlock = block;
+    newBlock.instructions := block.instructions ++ [instr];
+    
+    // 更新深度 (简化计算)
+    if instr.gate.gateType == GateType.SingleQubit {
+        newBlock.depth := block.depth + 1;
+    } else if instr.gate.gateType == GateType.TwoQubit {
+        newBlock.depth := block.depth + 2;
+    } else {
+        newBlock.depth := block.depth + 1;
+    }
+    
+    return newBlock;
+}
+
+// 计算电路资源成本
+def calculateResourceCost[block: CircuitBlock](): ResourceCost {
+    var gateCount := 0: !ℕ;
+    var tGateCount := 0: !ℕ;
+    var cliffordCount := 0: !ℕ;
+    
+    for i in [0..Length(block.instructions)) {
+        let instr = block.instructions[i];
+        gateCount := gateCount + 1;
+        
+        // 简化：假设 T 门需要特殊计数
+        // 实际中需要检查门类型
+        if !instr.gate.isClifford {
+            tGateCount := tGateCount + 1;
+        } else {
+            cliffordCount := cliffordCount + 1;
+        }
+    }
+    
+    return ResourceCost(
+        gateCount: gateCount,
+        tGateCount: tGateCount,
+        depthEstimate: block.depth,
+        qubitCount: block.qubitCount,
+        cliffordCount: cliffordCount
+    );
+}
+
+// ============================================
+// 量子电路构建器 (使用 Silq 量子类型)
+// ============================================
+
+// 应用 Hadamard 门
+def applyH[q: 𝔹](): 𝔹 {
+    return H(q);
+}
+
+// 应用 X 门
+def applyX[q: 𝔹](): 𝔹 {
+    return X(q);
+}
+
+// 应用 CNOT 门
+def applyCNOT[control: 𝔹, target: 𝔹](): 𝔹 × 𝔹 {
+    let newTarget := CNOT(control, target);
+    return (control, newTarget);
+}
+
+// 应用 CZ 门 (使用 H + CNOT)
+def applyCZ[control: 𝔹, target: 𝔹](): 𝔹 × 𝔹 {
+    var t := target;
+    t := H(t);
+    let (c, t2) := applyCNOT(control, t);
+    t2 := H(t2);
+    return (c, t2);
+}
+
+// 应用相位门
+def applyPhase[q: 𝔹, theta: !ℝ](): 𝔹 {
+    phase(theta);
+    return q;
+}
+
+// 测量量子比特
+def measureQubit[q: 𝔹](): !𝔹 {
+    return measure(q);
+}
+
+// ============================================
+// 常用电路模式
+// ============================================
+
+// 制备 Bell 态
+def prepareBellState(): 𝔹 × 𝔹 {
+    var q1 := false: 𝔹;
+    var q2 := false: 𝔹;
+    
+    q1 := H(q1);
+    let (q1_temp, q2_temp) := applyCNOT(q1, q2);
+    
+    return (q1_temp, q2_temp);
+}
+
+// 制备 GHZ 态 (n 量子比特)
+def prepareGHZState[n: !ℕ](): 𝔹^n {
+    var qubits := vector(n, false: 𝔹);
+    
+    // 第一个量子比特置为叠加态
+    qubits[0] := H(qubits[0]);
+    
+    // 依次应用 CNOT
+    for i in [0..n-1) {
+        let (ctrl, tgt) := applyCNOT(qubits[i], qubits[i+1]);
+        qubits[i] := ctrl;
+        qubits[i+1] := tgt;
+    }
+    
+    return qubits;
+}
+
+// 量子傅里叶变换 (简化版)
+def qft[qubits: 𝔹^n](): 𝔹^n {
+    var result := qubits;
+    let n := Length(qubits);
+    
+    for i in [0..n) {
+        result[i] := H(result[i]);
+        
+        for j in [i+1..n) {
+            let theta := 2.0 * 3.14159 / (2.0 ^ (!ℝ)(j - i + 1));
+            // 简化：实际需要使用受控相位门
+        }
+    }
+    
+    // 反转量子比特顺序
+    for i in [0..n/2) {
+        let temp := result[i];
+        result[i] := result[n - 1 - i];
+        result[n - 1 - i] := temp;
+    }
+    
+    return result;
+}
+
+// 打印电路信息
+def printCircuitInfo[block: CircuitBlock](): !𝟙 {
+    let cost := calculateResourceCost(block);
+    print("=== Circuit Information ===");
+    print($"Name: [circuit block]");
+    print($"Instructions: {Length(block.instructions)}");
+    print($"Qubits: {block.qubitCount}");
+    print($"Depth: {block.depth}");
+    print($"Gate Count: {cost.gateCount}");
+    print($"T-Gate Count: {cost.tGateCount}");
+    print($"Clifford Count: {cost.cliffordCount}");
+    return ();
+}

@@ -1,0 +1,162 @@
+// ============================================
+// QubitPool.silq - Qubit 资源池抽象
+// ============================================
+// Silq 的类型系统自动管理量子比特状态
+// 本模块提供经典的资源池元数据追踪
+
+// Qubit 状态枚举 (经典元数据)
+enum QubitState {
+    Available,
+    Allocated,
+    Measured,
+    Error
+}
+
+// Qubit 信息记录
+newtype QubitInfo = (
+    id: !ℕ,
+    state: QubitState,
+    allocationTime: !ℕ,
+    operationCount: !ℕ
+);
+
+// 资源池配置
+newtype PoolConfig = (
+    poolSize: !ℕ,
+    maxOperationsPerQubit: !ℕ,
+    enableTracking: !𝔹
+);
+
+// 资源池状态
+newtype QubitPool = (
+    qubits: QubitInfo[],
+    config: PoolConfig,
+    allocatedCount: !ℕ,
+    totalOperations: !ℕ
+);
+
+// ============================================
+// 核心函数
+// ============================================
+
+// 创建新的 Qubit 资源池
+def createQubitPool[size: !ℕ](config: PoolConfig): QubitPool {
+    var qubits: QubitInfo[] = [];
+    for i in [0..size) {
+        let info = QubitInfo(
+            id: i,
+            state: QubitState.Available,
+            allocationTime: 0,
+            operationCount: 0
+        );
+        qubits := qubits ++ [info];
+    }
+    return QubitPool(
+        qubits: qubits,
+        config: config,
+        allocatedCount: 0,
+        totalOperations: 0
+    );
+}
+
+// 分配 Qubit (返回经典索引，实际量子比特由 Silq 管理)
+def allocateQubit[pool: QubitPool](): (!ℕ, QubitPool) {
+    var newPool = pool;
+    for i in [0..Length(pool.qubits)) {
+        if pool.qubits[i].state == QubitState.Available {
+            // 更新 Qubit 状态
+            let oldInfo = pool.qubits[i];
+            let newInfo = QubitInfo(
+                id: oldInfo.id,
+                state: QubitState.Allocated,
+                allocationTime: oldInfo.allocationTime + 1,
+                operationCount: 0
+            );
+            newPool.qubits[i] := newInfo;
+            newPool.allocatedCount := newPool.allocatedCount + 1;
+            return (i, newPool);
+        }
+    }
+    // 资源池耗尽
+    return (Length(pool.qubits), newPool); // 返回越界索引表示失败
+}
+
+// 释放 Qubit
+def releaseQubit[pool: QubitPool](qubitId: !ℕ): QubitPool {
+    var newPool = pool;
+    if qubitId < Length(pool.qubits) {
+        let oldInfo = pool.qubits[qubitId];
+        let newInfo = QubitInfo(
+            id: oldInfo.id,
+            state: QubitState.Available,
+            allocationTime: 0,
+            operationCount: oldInfo.operationCount
+        );
+        newPool.qubits[qubitId] := newInfo;
+        newPool.allocatedCount := newPool.allocatedCount - 1;
+    }
+    return newPool;
+}
+
+// 记录 Qubit 操作
+def recordOperation[pool: QubitPool](qubitId: !ℕ): QubitPool {
+    var newPool = pool;
+    if qubitId < Length(pool.qubits) {
+        let oldInfo = pool.qubits[qubitId];
+        let newInfo = QubitInfo(
+            id: oldInfo.id,
+            state: oldInfo.state,
+            allocationTime: oldInfo.allocationTime,
+            operationCount: oldInfo.operationCount + 1
+        );
+        newPool.qubits[qubitId] := newInfo;
+        newPool.totalOperations := newPool.totalOperations + 1;
+    }
+    return newPool;
+}
+
+// 获取可用 Qubit 数量
+def getAvailableCount[pool: QubitPool](): !ℕ {
+    var count := 0: !ℕ;
+    for i in [0..Length(pool.qubits)) {
+        if pool.qubits[i].state == QubitState.Available {
+            count := count + 1;
+        }
+    }
+    return count;
+}
+
+// 获取资源池统计信息
+newtype PoolStats = (
+    totalQubits: !ℕ,
+    availableQubits: !ℕ,
+    allocatedQubits: !ℕ,
+    totalOperations: !ℕ,
+    avgOperationsPerQubit: !ℕ
+);
+
+def getPoolStats[pool: QubitPool](): PoolStats {
+    let available := getAvailableCount(pool);
+    let allocated := pool.allocatedCount;
+    let total := Length(pool.qubits);
+    let avgOps := if total > 0 then pool.totalOperations / total else 0;
+    
+    return PoolStats(
+        totalQubits: total,
+        availableQubits: available,
+        allocatedQubits: allocated,
+        totalOperations: pool.totalOperations,
+        avgOperationsPerQubit: avgOps
+    );
+}
+
+// 打印资源池状态 (调试用)
+def printPoolState[pool: QubitPool](): !𝟙 {
+    let stats := getPoolStats(pool);
+    print("=== Qubit Pool State ===");
+    print($"Total: {stats.totalQubits}");
+    print($"Available: {stats.availableQubits}");
+    print($"Allocated: {stats.allocatedQubits}");
+    print($"Total Operations: {stats.totalOperations}");
+    return ();
+}
