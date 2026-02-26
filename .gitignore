@@ -15,7 +15,7 @@ obj/
 .idea/
 *.swp
 *.swo
-IR/target/
+**/target/
 # OS
 Thumbs.db
 .DS_Store
