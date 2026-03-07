@@ -128,7 +128,7 @@ public class AIEnhancedScheduler
                 if (growthRate > 0.2f && process.CpuDemand > 500)
                 {
                     decisions.Add(new AIDecision(
-                        Action: "[预测] CPU 需求增长",
+                        Action: "[[预测]] CPU 需求增长",
                         Target: $"{process.Name} (PID: {process.Pid})",
                         Reason: $"增长率 {growthRate:P0}，提前干预",
                         Execute: sim => sim.AdjustProcessPriority(process.Pid, Math.Max(1, process.Priority - 2))
@@ -148,7 +148,7 @@ public class AIEnhancedScheduler
         if (starvingProcess != null && state.CpuUsage < 70)
         {
             decisions.Add(new AIDecision(
-                Action: "[公平] 防止进程饥饿",
+                Action: "[[公平]] 防止进程饥饿",
                 Target: $"{starvingProcess.Name} (PID: {starvingProcess.Pid})",
                 Reason: "低优先级进程长时间未获得 CPU 时间",
                 Execute: sim => sim.AdjustProcessPriority(starvingProcess.Pid, 5)
@@ -307,7 +307,7 @@ public class AIProcessHealthChecker
             if (_violationCount[process.Pid] >= 3)
             {
                 return new AIDecision(
-                    Action: "[健康] 进程无响应",
+                    Action: "[[健康]] 进程无响应",
                     Target: $"{process.Name} (PID: {process.Pid})",
                     Reason: "连续 3 次检测无响应，建议重启",
                     Execute: sim =>
@@ -329,7 +329,7 @@ public class AIProcessHealthChecker
             if (_violationCount[process.Pid] >= 5)
             {
                 return new AIDecision(
-                    Action: "[健康] 资源滥用",
+                    Action: "[[健康]] 资源滥用",
                     Target: $"{process.Name} (PID: {process.Pid})",
                     Reason: "连续 5 次检测资源滥用，建议终止",
                     Execute: sim =>
