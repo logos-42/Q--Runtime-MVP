@@ -204,7 +204,7 @@ public class AIDiskManager
             if (highIoProcess != null)
             {
                 return new AIDecision(
-                    Action: "[磁盘] 队列拥塞控制",
+                    Action: "[[磁盘]] 队列拥塞控制",
                     Target: $"{highIoProcess.Name} (PID: {highIoProcess.Pid})",
                     Reason: $"磁盘队列 {diskState.QueueLength} > 10，暂停高 I/O 进程",
                     Execute: _ => AnsiConsole.MarkupLine($"  [red]→ {highIoProcess.Name} I/O 暂停 500ms[/]")
@@ -249,7 +249,7 @@ public class AINetworkManager
             if (bandwidth > 80 && networkState.TotalUsage > 90)
             {
                 return new AIDecision(
-                    Action: "[网络] 带宽限制",
+                    Action: "[[网络]] 带宽限制",
                     Target: $"{process.Name} (PID: {process.Pid})",
                     Reason: $"网络使用 {bandwidth}%，总带宽 {networkState.TotalUsage}%",
                     Execute: _ => AnsiConsole.MarkupLine($"  [yellow]→ {process.Name} 网络限速 50%[/]")
@@ -268,7 +268,7 @@ public class AINetworkManager
             if (lowPriorityHighBandwidth != null)
             {
                 return new AIDecision(
-                    Action: "[网络] 拥塞控制",
+                    Action: "[[网络]] 拥塞控制",
                     Target: $"{lowPriorityHighBandwidth.Name} (PID: {lowPriorityHighBandwidth.Pid})",
                     Reason: $"网络拥塞 {networkState.TotalUsage}%，限制低优先级进程",
                     Execute: _ => AnsiConsole.MarkupLine($"  [red]→ {lowPriorityHighBandwidth.Name} 网络暂停 1s[/]")
